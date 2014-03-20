@@ -64,7 +64,8 @@ func TestDoneAlways(t *testing.T) {
 	//The always callback run after all done or fail callbacks be done
 	AreEqual(order, []string{TASK_END, GET, CALL_DONE, CALL_DONE, CALL_ALWAYS}, t)
 	AreEqual(r, []interface{}{10, "ok"}, t)
-	AreEqual(ok, true, t)
+	AreEqual(ok, RESULT_SUCCESS, t)
+	t.Log(f.r)
 
 	//if task be done, the callback function will be immediately called
 	f.Done(done).Fail(fail)
@@ -82,7 +83,7 @@ func TestFailAlways(t *testing.T) {
 
 	AreEqual(order, []string{TASK_END, GET, CALL_FAIL, CALL_FAIL, CALL_ALWAYS}, t)
 	AreEqual(r, []interface{}{10, "fail"}, t)
-	AreEqual(ok, false, t)
+	AreEqual(ok, RESULT_FAILURE, t)
 
 }
 
@@ -118,7 +119,7 @@ func TestPipeWhenDone(t *testing.T) {
 
 	AreEqual(order, []string{TASK_END, CALL_DONE, DONE_Pipe_END, GET}, t)
 	AreEqual(r, []interface{}{20, "ok2"}, t)
-	AreEqual(ok, true, t)
+	AreEqual(ok, RESULT_SUCCESS, t)
 	AreEqual(isOk, true, t)
 
 	//test fail branch for Pipe function
@@ -130,11 +131,11 @@ func TestPipeWhenDone(t *testing.T) {
 
 	AreEqual(order, []string{TASK_END, CALL_FAIL, FAIL_Pipe_END, GET}, t)
 	AreEqual(r, []interface{}{20, "fail2"}, t)
-	AreEqual(ok, false, t)
+	AreEqual(ok, RESULT_FAILURE, t)
 	AreEqual(isOk, true, t)
 
 	f, isOk = f.Pipe(taskDonePipe, taskFailPipe)
-	t.Log("isok?", isOk, f, f.oncePipe)
+	//t.Log("isok?", isOk, f, f.oncePipe)
 	AreEqual(isOk, true, t)
 	_, _ = f.Get()
 }

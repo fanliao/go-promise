@@ -2,6 +2,7 @@ package promise
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -14,10 +15,18 @@ const (
 	CALLBACK_ALWAYS
 )
 
+type resultType int
+
+const (
+	RESULT_SUCCESS resultType = iota
+	RESULT_FAILURE
+	RESULT_CANCELLED
+)
+
 //代表异步任务的结果
 type PromiseResult struct {
 	result []interface{}
-	ok     bool
+	typ    resultType
 }
 
 //处理链式调用
@@ -34,12 +43,12 @@ type Promise struct {
 
 //Reslove表示任务正常完成
 func (this *Promise) Reslove(v ...interface{}) (e error) {
-	return this.end(&PromiseResult{v, true})
+	return this.end(&PromiseResult{v, RESULT_SUCCESS})
 }
 
 //Reject表示任务失败
 func (this *Promise) Reject(v ...interface{}) (e error) {
-	return this.end(&PromiseResult{v, false})
+	return this.end(&PromiseResult{v, RESULT_FAILURE})
 }
 
 //Set a Promise can be cancelled
@@ -130,19 +139,19 @@ func (this *Future) IsCancelled() bool {
 
 //Get函数将一直阻塞直到任务完成,并返回任务的结果
 //如果任务已经完成，后续的Get将直接返回任务结果
-func (this *Future) Get() ([]interface{}, bool) {
+func (this *Future) Get() ([]interface{}, resultType) {
 	if fr, ok := <-this.chOut; ok {
-		return fr.result, fr.ok
+		return fr.result, fr.typ
 	} else {
-		r, ok := this.r.result, this.r.ok
-		return r, ok
+		r, typ := this.r.result, this.r.typ
+		return r, typ
 	}
 }
 
 //Get函数将一直阻塞直到任务完成或超过指定的Timeout时间
 //如果任务已经完成，后续的Get将直接返回任务结果
 //mm的单位是毫秒
-func (this *Future) GetOrTimeout(mm int) ([]interface{}, bool, bool) {
+func (this *Future) GetOrTimeout(mm int) ([]interface{}, resultType, bool) {
 	if mm == 0 {
 		mm = 10
 	} else {
@@ -150,13 +159,13 @@ func (this *Future) GetOrTimeout(mm int) ([]interface{}, bool, bool) {
 	}
 	select {
 	case <-time.After((time.Duration)(mm) * time.Nanosecond):
-		return nil, false, true
+		return nil, 0, true
 	case fr, ok := <-this.chOut:
 		if ok {
-			return fr.result, fr.ok, false
+			return fr.result, fr.typ, false
 		} else {
-			r, ok := this.r.result, this.r.ok
-			return r, ok, false
+			r, typ := this.r.result, this.r.typ
+			return r, typ, false
 		}
 
 	}
@@ -202,9 +211,9 @@ func (this *Future) Pipe(callbacks ...(func(v ...interface{}) *Future)) (result 
 		if this.r != nil {
 			f := this
 
-			if this.r.ok && callbacks[0] != nil {
+			if this.r.typ == RESULT_SUCCESS && callbacks[0] != nil {
 				f = (callbacks[0](this.r.result...))
-			} else if !this.r.ok && len(callbacks) > 1 && callbacks[1] != nil {
+			} else if this.r.typ != RESULT_FAILURE && len(callbacks) > 1 && callbacks[1] != nil {
 				f = (callbacks[1](this.r.result...))
 			}
 			result = f
@@ -298,7 +307,7 @@ func (this *Promise) setResult(r *PromiseResult) {
 
 func (this *Future) startPipe() {
 	//处理链式异步任务
-	pipeTask, pipePromise := this.getPipe(this.r.ok)
+	pipeTask, pipePromise := this.getPipe(this.r.typ == RESULT_SUCCESS)
 	var f *Future
 	if pipeTask != nil {
 		f = pipeTask(this.r.result...)
@@ -317,10 +326,12 @@ func (this *Future) startPipe() {
 //执行回调函数
 func execCallback(r *PromiseResult, dones []func(v ...interface{}), fails []func(v ...interface{}), always []func(v ...interface{})) {
 	var callbacks []func(v ...interface{})
-	if r.ok {
+	if r.typ == RESULT_SUCCESS {
 		callbacks = dones
+		fmt.Println(r, "ok")
 	} else {
 		callbacks = fails
+		fmt.Println(r, "fail")
 	}
 
 	forFs := func(s []func(v ...interface{})) {
@@ -348,8 +359,8 @@ func (this *Future) handleOneCallback(callback func(v ...interface{}), t callbac
 		}
 	}
 	finalAction := func(r *PromiseResult) {
-		if (t == CALLBACK_DONE && r.ok) ||
-			(t == CALLBACK_FAIL && !r.ok) ||
+		if (t == CALLBACK_DONE && r.typ == RESULT_SUCCESS) ||
+			(t == CALLBACK_FAIL && r.typ == RESULT_FAILURE) ||
 			(t == CALLBACK_ALWAYS) {
 			callback(r.result...)
 		}
@@ -514,10 +525,10 @@ func WhenAll(fs ...*Future) *Future {
 			rs := make([]interface{}, len(fs))
 			allOk := true
 			for i, f := range fs {
-				r, ok := f.Get()
-				r = append(r, ok)
+				r, typ := f.Get()
+				r = append(r, typ)
 				rs[i] = r
-				if !ok {
+				if typ != RESULT_SUCCESS {
 					allOk = false
 				}
 			}
