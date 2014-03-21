@@ -158,13 +158,13 @@ func TestGetOrTimeout(t *testing.T) {
 	AreEqual(timeout, false, t)
 	AreEqual(order, []string{GET, TASK_END}, t)
 	AreEqual(r, []interface{}{10, "ok"}, t)
-	AreEqual(ok, true, t)
+	AreEqual(ok, RESULT_SUCCESS, t)
 
 	//if task be done and timeout is 0, still can get return value
 	r, ok, timeout = f.GetOrTimeout(0)
 	AreEqual(timeout, false, t)
 	AreEqual(r, []interface{}{10, "ok"}, t)
-	AreEqual(ok, true, t)
+	AreEqual(ok, RESULT_SUCCESS, t)
 }
 
 func TestException(t *testing.T) {
@@ -191,7 +191,7 @@ func TestException(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	AreEqual(order, []string{"task be end,", "run Fail callback,", "run Always callback,"}, t)
 	AreEqual(r, []interface{}{"exception"}, t)
-	AreEqual(ok, false, t)
+	AreEqual(ok, RESULT_FAILURE, t)
 
 }
 
@@ -225,23 +225,83 @@ func TestAny(t *testing.T) {
 
 	r, ok := startTwoTask(200, 250).Get()
 	AreEqual(r, []interface{}{10, "ok"}, t)
-	AreEqual(ok, true, t)
+	AreEqual(ok, RESULT_SUCCESS, t)
 
 	r, ok = startTwoTask(280, 250).Get()
 	AreEqual(r, []interface{}{20, "ok2"}, t)
-	AreEqual(ok, true, t)
+	AreEqual(ok, RESULT_SUCCESS, t)
 
 	r, ok = startTwoTask(-280, -250).Get()
 	AreEqual(r, []interface{}{[]interface{}{-10, "fail"}, []interface{}{-20, "fail2"}}, t)
-	AreEqual(ok, false, t)
+	AreEqual(ok, RESULT_FAILURE, t)
 
 	r, ok = startTwoTask(-280, 150).Get()
 	AreEqual(r, []interface{}{20, "ok2"}, t)
-	AreEqual(ok, true, t)
+	AreEqual(ok, RESULT_SUCCESS, t)
 
 	r, ok = WhenAny().Get()
 	AreEqual(r, *new([]interface{}), t)
-	AreEqual(ok, true, t)
+	AreEqual(ok, RESULT_SUCCESS, t)
+
+	var c1, c2 bool
+	startTwoCanCancelTask := func(t1 int, t2 int) *Future {
+		timeout1 := time.Duration(t1)
+		timeout2 := time.Duration(t2)
+		task1 := func(canceller Canceller) (r []interface{}) {
+			for i := 0; i < 10; i++ {
+				if timeout1 > 0 {
+					time.Sleep(timeout1 * time.Millisecond)
+				} else {
+					time.Sleep((-1 * timeout1) * time.Millisecond)
+				}
+				if canceller.IsCancellationRequested() {
+					t.Log("cancel 1")
+					canceller.SetIsCancelled()
+					c1 = true
+					return nil
+				}
+			}
+			if timeout1 > 0 {
+				r = []interface{}{10, "ok", true}
+			} else {
+				r = []interface{}{-10, "fail", false}
+			}
+			return
+		}
+		task2 := func(canceller Canceller) (r []interface{}) {
+			for i := 0; i < 10; i++ {
+				if timeout2 > 0 {
+					time.Sleep(timeout2 * time.Millisecond)
+				} else {
+					time.Sleep((-1 * timeout2) * time.Millisecond)
+				}
+				if canceller.IsCancellationRequested() {
+					t.Log("cancel 2")
+					canceller.SetIsCancelled()
+					c2 = true
+					return nil
+				}
+			}
+			if timeout2 > 0 {
+				r = []interface{}{20, "ok2", true}
+			} else {
+				r = []interface{}{-20, "fail2", false}
+			}
+			return
+		}
+		f := WhenAny(StartCanCancel(task1), StartCanCancel(task2))
+		return f
+	}
+	r, ok = startTwoCanCancelTask(10, 250).Get()
+	AreEqual(r, []interface{}{10, "ok"}, t)
+	AreEqual(ok, RESULT_SUCCESS, t)
+	time.Sleep(1000 * time.Millisecond)
+	AreEqual(c2, true, t)
+
+	//r, ok = startTwoCanCancelTask(280, 15).Get()
+	//AreEqual(r, []interface{}{20, "ok2"}, t)
+	//AreEqual(ok, RESULT_SUCCESS, t)
+	//AreEqual(c1, true, t)
 }
 
 func TestWhen(t *testing.T) {
@@ -272,30 +332,32 @@ func TestWhen(t *testing.T) {
 		return f
 	}
 	r, ok := startTwoTask(200, 250).Get()
-	AreEqual(r, []interface{}{[]interface{}{10, "ok", true}, []interface{}{20, "ok2", true}}, t)
-	AreEqual(ok, true, t)
+	AreEqual(r, []interface{}{[]interface{}{10, "ok", RESULT_SUCCESS}, []interface{}{20, "ok2", RESULT_SUCCESS}}, t)
+	AreEqual(ok, RESULT_SUCCESS, t)
 
 	r, ok = startTwoTask(250, 210).Get()
-	AreEqual(r, []interface{}{[]interface{}{10, "ok", true}, []interface{}{20, "ok2", true}}, t)
-	AreEqual(ok, true, t)
+	AreEqual(r, []interface{}{[]interface{}{10, "ok", RESULT_SUCCESS}, []interface{}{20, "ok2", RESULT_SUCCESS}}, t)
+	AreEqual(ok, RESULT_SUCCESS, t)
 
 	r, ok = startTwoTask(-250, 210).Get()
-	AreEqual(r, []interface{}{[]interface{}{-10, "fail", false}, []interface{}{20, "ok2", true}}, t)
-	AreEqual(ok, false, t)
+	AreEqual(r, []interface{}{[]interface{}{-10, "fail", RESULT_FAILURE}, []interface{}{20, "ok2", RESULT_SUCCESS}}, t)
+	AreEqual(ok, RESULT_FAILURE, t)
 
 	r, ok = startTwoTask(-250, -210).Get()
-	AreEqual(r, []interface{}{[]interface{}{-10, "fail", false}, []interface{}{-20, "fail2", false}}, t)
-	AreEqual(ok, false, t)
+	AreEqual(r, []interface{}{[]interface{}{-10, "fail", RESULT_FAILURE}, []interface{}{-20, "fail2", RESULT_FAILURE}}, t)
+	AreEqual(ok, RESULT_FAILURE, t)
 
 	r, ok = WhenAll().Get()
 	AreEqual(r, *new([]interface{}), t)
-	AreEqual(ok, true, t)
+	AreEqual(ok, RESULT_SUCCESS, t)
+
 }
 
 func TestWrap(t *testing.T) {
 	r, ok := Wrap(10).Get()
 	AreEqual(r, []interface{}{10}, t)
-	AreEqual(ok, true, t)
+	AreEqual(ok, RESULT_SUCCESS, t)
+
 }
 
 func TestCancel(t *testing.T) {
@@ -312,21 +374,24 @@ func TestCancel(t *testing.T) {
 	}
 
 	f := StartCanCancel(task)
-	f.Cancel()
+	f.RequestCancel()
 	r, ok := f.Get()
 	AreEqual(f.IsCancelled(), true, t)
 	AreEqual(len(r), 0, t)
-	AreEqual(ok, true, t)
+	t.Log(r)
+	AreEqual(ok, RESULT_CANCELLED, t)
 
 	task = func(canceller Canceller) []interface{} {
 		time.Sleep(100 * time.Millisecond)
 		return []interface{}{1}
 	}
 	f = StartCanCancel(task)
-	f.Cancel()
+	c := f.RequestCancel()
+	AreEqual(c, true, t)
 	r, ok = f.Get()
 	AreEqual(r, []interface{}{1}, t)
-	AreEqual(ok, true, t)
+	AreEqual(ok, RESULT_SUCCESS, t)
+
 	AreEqual(f.IsCancelled(), false, t)
 
 	task1 := func() []interface{} {
@@ -334,11 +399,12 @@ func TestCancel(t *testing.T) {
 		return []interface{}{1}
 	}
 	f = Start(task1)
-	c := f.Cancel()
+	c = f.RequestCancel()
+	AreEqual(c, false, t)
 	r, ok = f.Get()
 	AreEqual(r, []interface{}{1}, t)
-	AreEqual(ok, true, t)
+	AreEqual(ok, RESULT_SUCCESS, t)
+
 	AreEqual(f.IsCancelled(), false, t)
-	AreEqual(c, false, t)
 
 }

@@ -2,11 +2,13 @@ package promise
 
 import (
 	"errors"
-	"fmt"
+	//"fmt"
 	"sync"
 	"time"
 )
 
+type action func() []interface{}
+type actionCanCancel func(canceller Canceller) []interface{}
 type callbackType int
 
 const (
@@ -39,6 +41,11 @@ type pipe struct {
 type Promise struct {
 	onceEnd *sync.Once
 	*Future
+}
+
+//Cancel表示任务正常完成
+func (this *Promise) Cancel(v ...interface{}) (e error) {
+	return this.end(&PromiseResult{v, RESULT_CANCELLED})
 }
 
 //Reslove表示任务正常完成
@@ -103,9 +110,9 @@ func (this *Future) Canceller() Canceller {
 }
 
 //取消异步任务
-func (this *Future) Cancel() bool {
+func (this *Future) RequestCancel() bool {
 	if this.canceller != nil {
-		this.canceller.Cancel()
+		this.canceller.RequestCancel()
 		return true
 	} else {
 		return false
@@ -237,7 +244,7 @@ type canceller struct {
 }
 
 //Cancel任务
-func (this *canceller) Cancel() {
+func (this *canceller) RequestCancel() {
 	this.lock.Lock()
 	defer this.lock.Unlock()
 	this.isRequested = true
@@ -269,7 +276,7 @@ func (this *Promise) end(r *PromiseResult) (e error) { //r *PromiseResult) {
 	defer func() {
 		e = getError(recover())
 	}()
-	e = errors.New("Cannoy resolve/reject more than once")
+	e = errors.New("Cannot resolve/reject/cancel more than once")
 	this.onceEnd.Do(func() {
 		//r := <-this.chIn
 		this.setResult(r)
@@ -278,10 +285,12 @@ func (this *Promise) end(r *PromiseResult) (e error) { //r *PromiseResult) {
 		this.chOut <- r
 		close(this.chOut)
 
-		//任务完成后调用回调函数
-		execCallback(r, this.dones, this.fails, this.always)
+		if r.typ != RESULT_CANCELLED {
+			//任务完成后调用回调函数
+			execCallback(r, this.dones, this.fails, this.always)
 
-		this.startPipe()
+			this.startPipe()
+		}
 		e = nil
 	})
 	return
@@ -328,10 +337,10 @@ func execCallback(r *PromiseResult, dones []func(v ...interface{}), fails []func
 	var callbacks []func(v ...interface{})
 	if r.typ == RESULT_SUCCESS {
 		callbacks = dones
-		fmt.Println(r, "ok")
+		//fmt.Println(r, "ok")
 	} else {
 		callbacks = fails
-		fmt.Println(r, "fail")
+		//fmt.Println(r, "fail")
 	}
 
 	forFs := func(s []func(v ...interface{})) {
@@ -409,16 +418,11 @@ func Start0(action func()) *Future {
 }
 
 //异步执行一个函数。如果最后一个返回值为bool，则将认为此值代表异步任务成功或失败。如果函数抛出error，则认为异步任务失败
-func start(action interface{}, canCancel bool) *Future {
+func start(act interface{}, canCancel bool) *Future {
 	fu := NewPromise()
 
-	var action1 func() []interface{}
-	var action2 func(canceller Canceller) []interface{}
 	if canCancel {
-		action2 = action.(func(canceller Canceller) []interface{})
 		fu.EnableCanceller()
-	} else {
-		action1 = action.(func() []interface{})
 	}
 
 	go func() {
@@ -430,22 +434,27 @@ func start(action interface{}, canCancel bool) *Future {
 
 		var r []interface{}
 		if canCancel {
-			r = action2(fu.Canceller())
+			r = (act.(func(canceller Canceller) []interface{}))(fu.Canceller())
 		} else {
-			r = action1()
+			r = (act.(func() []interface{}))()
 		}
-		if l := len(r); l > 0 {
-			if done, ok := r[l-1].(bool); ok {
-				if done {
-					fu.Reslove(r[:l-1]...)
+
+		if fu.IsCancelled() {
+			fu.Cancel(r...)
+		} else {
+			if l := len(r); l > 0 {
+				if done, ok := r[l-1].(bool); ok {
+					if done {
+						fu.Reslove(r[:l-1]...)
+					} else {
+						fu.Reject(r[:l-1]...)
+					}
 				} else {
-					fu.Reject(r[:l-1]...)
+					fu.Reslove(r...)
 				}
 			} else {
 				fu.Reslove(r...)
 			}
-		} else {
-			fu.Reslove(r...)
 		}
 	}()
 
@@ -507,6 +516,12 @@ func WhenAny(fs ...*Future) *Future {
 						break
 					}
 				case _ = <-nf.chOut:
+					for _, f := range fs {
+						if c := f.Canceller(); c != nil {
+							//fmt.Println("cancel", i)
+							f.RequestCancel()
+						}
+					}
 					break
 				}
 			}
