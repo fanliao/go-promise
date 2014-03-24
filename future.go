@@ -87,7 +87,7 @@ func (this *Promise) Always(callback func(v ...interface{})) *Promise {
 //Cancel一个任务的interface
 type Canceller interface {
 	IsCancellationRequested() bool
-	SetIsCancelled()
+	SetCancelled()
 }
 
 //Future代表一个异步任务的readonly-view
@@ -126,9 +126,9 @@ func (this *Future) IsCancellationRequested() bool {
 }
 
 //设置任务为已被取消状态
-func (this *Future) SetIsCancelled() {
+func (this *Future) SetCancelled() {
 	if this.canceller != nil && this.r == nil {
-		this.canceller.SetIsCancelled()
+		this.canceller.SetCancelled()
 	}
 }
 
@@ -255,7 +255,7 @@ func (this *canceller) IsCancellationRequested() (r bool) {
 }
 
 //设置任务已经被Cancel
-func (this *canceller) SetIsCancelled() {
+func (this *canceller) SetCancelled() {
 	execWithLock(this.lockC, func() {
 		this.isCancelled = true
 	})

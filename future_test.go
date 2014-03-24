@@ -256,7 +256,7 @@ func TestAny(t *testing.T) {
 				}
 				if canceller.IsCancellationRequested() {
 					t.Log("cancel 1")
-					canceller.SetIsCancelled()
+					canceller.SetCancelled()
 					c1 = true
 					return nil
 				}
@@ -277,7 +277,7 @@ func TestAny(t *testing.T) {
 				}
 				if canceller.IsCancellationRequested() {
 					t.Log("cancel 2")
-					canceller.SetIsCancelled()
+					canceller.SetCancelled()
 					c2 = true
 					return nil
 				}
@@ -365,7 +365,7 @@ func TestCancel(t *testing.T) {
 	task := func(canceller Canceller) []interface{} {
 		for i < 50 {
 			if canceller.IsCancellationRequested() {
-				canceller.SetIsCancelled()
+				canceller.SetCancelled()
 				return nil
 			}
 			time.Sleep(100 * time.Millisecond)
