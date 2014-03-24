@@ -2,13 +2,10 @@ package promise
 
 import (
 	"errors"
-	//"fmt"
 	"sync"
 	"time"
 )
 
-type action func() []interface{}
-type actionCanCancel func(canceller Canceller) []interface{}
 type callbackType int
 
 const (
@@ -111,11 +108,11 @@ func (this *Future) Canceller() Canceller {
 
 //取消异步任务
 func (this *Future) RequestCancel() bool {
-	if this.canceller != nil {
+	if this.r != nil || this.canceller == nil {
+		return false
+	} else {
 		this.canceller.RequestCancel()
 		return true
-	} else {
-		return false
 	}
 }
 
@@ -130,7 +127,7 @@ func (this *Future) IsCancellationRequested() bool {
 
 //设置任务为已被取消状态
 func (this *Future) SetIsCancelled() {
-	if this.canceller != nil {
+	if this.canceller != nil && this.r == nil {
 		this.canceller.SetIsCancelled()
 	}
 }
@@ -164,6 +161,7 @@ func (this *Future) GetOrTimeout(mm int) ([]interface{}, resultType, bool) {
 	} else {
 		mm = mm * 1000 * 1000
 	}
+
 	select {
 	case <-time.After((time.Duration)(mm) * time.Nanosecond):
 		return nil, 0, true
@@ -213,62 +211,62 @@ func (this *Future) Pipe(callbacks ...(func(v ...interface{}) *Future)) (result 
 	}
 
 	this.oncePipe.Do(func() {
-		this.lock.Lock()
-		defer this.lock.Unlock()
-		if this.r != nil {
-			f := this
-
-			if this.r.typ == RESULT_SUCCESS && callbacks[0] != nil {
-				f = (callbacks[0](this.r.result...))
-			} else if this.r.typ != RESULT_FAILURE && len(callbacks) > 1 && callbacks[1] != nil {
-				f = (callbacks[1](this.r.result...))
+		execWithLock(this.lock, func() {
+			if this.r != nil {
+				result = this
+				if this.r.typ == RESULT_SUCCESS && callbacks[0] != nil {
+					result = (callbacks[0](this.r.result...))
+				} else if this.r.typ != RESULT_FAILURE && len(callbacks) > 1 && callbacks[1] != nil {
+					result = (callbacks[1](this.r.result...))
+				}
+			} else {
+				this.pipeDoneTask = callbacks[0]
+				if len(callbacks) > 1 {
+					this.pipeFailTask = callbacks[1]
+				}
+				this.pipePromise = NewPromise()
+				result = this.pipePromise.Future
 			}
-			result = f
-		} else {
-			this.pipeDoneTask = callbacks[0]
-			if len(callbacks) > 1 {
-				this.pipeFailTask = callbacks[1]
-			}
-			this.pipePromise = NewPromise()
-			result = this.pipePromise.Future
-		}
+		})
 		ok = true
 	})
 	return
 }
 
 type canceller struct {
-	lock        *sync.Mutex
+	lockC       *sync.Mutex
 	isRequested bool
 	isCancelled bool
 }
 
 //Cancel任务
 func (this *canceller) RequestCancel() {
-	this.lock.Lock()
-	defer this.lock.Unlock()
-	this.isRequested = true
+	execWithLock(this.lockC, func() {
+		this.isRequested = true
+	})
 }
 
 //已经被要求取消任务
-func (this *canceller) IsCancellationRequested() bool {
-	this.lock.Lock()
-	defer this.lock.Unlock()
-	return this.isRequested
+func (this *canceller) IsCancellationRequested() (r bool) {
+	execWithLock(this.lockC, func() {
+		r = this.isRequested
+	})
+	return
 }
 
 //设置任务已经被Cancel
 func (this *canceller) SetIsCancelled() {
-	this.lock.Lock()
-	defer this.lock.Unlock()
-	this.isCancelled = true
+	execWithLock(this.lockC, func() {
+		this.isCancelled = true
+	})
 }
 
 //任务已经被Cancel
-func (this *canceller) IsCancelled() bool {
-	this.lock.Lock()
-	defer this.lock.Unlock()
-	return this.isCancelled
+func (this *canceller) IsCancelled() (r bool) {
+	execWithLock(this.lockC, func() {
+		r = this.isCancelled
+	})
+	return
 }
 
 //完成一个任务
@@ -278,7 +276,6 @@ func (this *Promise) end(r *PromiseResult) (e error) { //r *PromiseResult) {
 	}()
 	e = errors.New("Cannot resolve/reject/cancel more than once")
 	this.onceEnd.Do(func() {
-		//r := <-this.chIn
 		this.setResult(r)
 
 		//让Get函数可以返回
@@ -289,11 +286,19 @@ func (this *Promise) end(r *PromiseResult) (e error) { //r *PromiseResult) {
 			//任务完成后调用回调函数
 			execCallback(r, this.dones, this.fails, this.always)
 
-			this.startPipe()
+			pipeTask, pipePromise := this.getPipe(this.r.typ == RESULT_SUCCESS)
+			this.startPipe(pipeTask, pipePromise)
 		}
 		e = nil
 	})
 	return
+}
+
+//set this.r
+func (this *Promise) setResult(r *PromiseResult) {
+	this.lock.Lock()
+	defer this.lock.Unlock()
+	this.r = r
 }
 
 //返回与链式调用相关的对象
@@ -307,28 +312,19 @@ func (this *Future) getPipe(isResolved bool) (func(v ...interface{}) *Future, *P
 	}
 }
 
-//set this.r
-func (this *Promise) setResult(r *PromiseResult) {
-	this.lock.Lock()
-	defer this.lock.Unlock()
-	this.r = r
-}
-
-func (this *Future) startPipe() {
+func (this *Future) startPipe(pipeTask func(v ...interface{}) *Future, pipePromise *Promise) {
 	//处理链式异步任务
-	pipeTask, pipePromise := this.getPipe(this.r.typ == RESULT_SUCCESS)
-	var f *Future
+	//var f *Future
 	if pipeTask != nil {
-		f = pipeTask(this.r.result...)
-	} else {
-		f = this
+		f := pipeTask(this.r.result...)
+		f.Done(func(v ...interface{}) {
+			pipePromise.Reslove(v...)
+		}).Fail(func(v ...interface{}) {
+			pipePromise.Reject(v...)
+		})
+		//} else {
+		//	f = this
 	}
-
-	f.Done(func(v ...interface{}) {
-		pipePromise.Reslove(v...)
-	}).Fail(func(v ...interface{}) {
-		pipePromise.Reject(v...)
-	})
 
 }
 
@@ -337,10 +333,8 @@ func execCallback(r *PromiseResult, dones []func(v ...interface{}), fails []func
 	var callbacks []func(v ...interface{})
 	if r.typ == RESULT_SUCCESS {
 		callbacks = dones
-		//fmt.Println(r, "ok")
 	} else {
 		callbacks = fails
-		//fmt.Println(r, "fail")
 	}
 
 	forFs := func(s []func(v ...interface{})) {
@@ -380,19 +374,16 @@ func (this *Future) handleOneCallback(callback func(v ...interface{}), t callbac
 }
 
 //添加回调函数的框架函数
-func (this *Future) addCallback(pendingAction func(), finalAction func(*PromiseResult)) func() {
-	this.lock.Lock()
-	defer this.lock.Unlock()
-
-	if this.r == nil {
-		pendingAction()
-		return nil
-	} else {
-		r := this.r
-		return func() {
-			finalAction(r)
+func (this *Future) addCallback(pendingAction func(), finalAction func(*PromiseResult)) (r func()) {
+	execWithLock(this.lock, func() {
+		if this.r == nil {
+			pendingAction()
+			r = nil
+		} else {
+			r = func() { finalAction(this.r) }
 		}
-	}
+	})
+	return
 }
 
 func StartCanCancel(action func(canceller Canceller) []interface{}) *Future {
@@ -518,7 +509,6 @@ func WhenAny(fs ...*Future) *Future {
 				case _ = <-nf.chOut:
 					for _, f := range fs {
 						if c := f.Canceller(); c != nil {
-							//fmt.Println("cancel", i)
 							f.RequestCancel()
 						}
 					}
@@ -556,6 +546,12 @@ func WhenAll(fs ...*Future) *Future {
 	}
 
 	return f.Future
+}
+
+func execWithLock(lock *sync.Mutex, act func()) {
+	lock.Lock()
+	defer lock.Unlock()
+	act()
 }
 
 func forSlice(s []func(v ...interface{}), f func(func(v ...interface{}))) {
