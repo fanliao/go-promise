@@ -65,7 +65,7 @@ go func(){
 		p.Reject(url, err)
 	}
 	p.Resolve(url, resp.Body)
-}
+}()
 r, typ := p.Get()
 ```
 
@@ -130,9 +130,9 @@ f := promise.Start(func() []interface{} {
 v, typ, ok := f.GetOrTimeout(100)  //return nil, 0, false
 ```
 
-### Join the multiple futures
+### Waits for multiple futures
 
-Can join the multiple futures
+Creates a future that will complete when all of the supplied future have completed.
 ```go
 task1 := func() (r []interface{}) {
 	time.Sleep(100 * time.Millisecond)
@@ -162,7 +162,7 @@ f := WhenAll(Start(task1), Start(task2))
 r, ok := f.Get()
 ```
 
-WhenAny function will return a future which is success when any future is success
+Creates a future that will complete when any of the supplied tasks have completed.
 ```go
 task1 := func() (r []interface{}) {
 	time.Sleep(100 * time.Millisecond)
@@ -177,7 +177,7 @@ f := WhenAny(Start(task1), Start(task2))
 r, ok := f.Get()
 ```
 
-### Pipe the future
+### Promise pipelining
 
 ```go
 task1 := func() (r []interface{}) {
@@ -197,11 +197,34 @@ r, ok := f.Get()
 
 ### Cancel the future
 
+If need cancel a future, need send a canceller object to 
+```go
+import "github.com/fanliao/go-promise"
+import "net/http"
+
+p := promise.NewPromise().EnableCanceller()
+
+go func(canceller Canceller){
+	for i < 50 {
+		if canceller.IsCancellationRequested() {
+			p.Cancel(0)
+			return 0
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	p.Resolve(1)
+}(p.Canceller())
+f.RequestCancel()
+
+r, typ := p.Get()
+```
+
+Or can use StartCanCancel() to submit a future task which can be cancelled
 ```go
 task := func(canceller Canceller) []interface{} {
 	for i < 50 {
 		if canceller.IsCancellationRequested() {
-			canceller.SetIsCancelled()
+			canceller.SetCancelled()
 			return 0
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -211,10 +234,11 @@ task := func(canceller Canceller) []interface{} {
 f := StartCanCancel(task1)
 time.Sleep(200 * time.Millisecond)
 f.RequestCancel()
+
 r, ok := f.Get()
 ```
 
-When call WhenAll() function, if a future is success, then will try to check if other future is enable cancel. If yes, will request cancelling the future
+When call WhenAny() function, if a future is completed correctly, then will try to check if other future is enable cancel. If yes, will request cancelling the future
 
 
 ## Document
