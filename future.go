@@ -141,6 +141,10 @@ func (this *Future) IsCancelled() bool {
 	}
 }
 
+func (this *Future) GetChan() chan *PromiseResult {
+	return this.chOut
+}
+
 //Get函数将一直阻塞直到任务完成,并返回任务的结果
 //如果任务已经完成，后续的Get将直接返回任务结果
 func (this *Future) Get() ([]interface{}, resultType) {
@@ -527,14 +531,21 @@ func WhenAll(fs ...*Future) *Future {
 		f.Reslove()
 	} else {
 		go func() {
-			rs := make([]interface{}, len(fs))
+			rs := make([]interface{}, len(fs), len(fs))
+			typs := make([]resultType, len(fs), len(fs))
 			allOk := true
 			for i, f := range fs {
-				r, typ := f.Get()
-				r = append(r, typ)
-				rs[i] = r
-				if typ != RESULT_SUCCESS {
+				rs[i], typs[i] = f.Get()
+
+				if typs[i] != RESULT_SUCCESS {
 					allOk = false
+				}
+			}
+			for i, r := range rs {
+				if !allOk {
+					rs[i] = append(r.([]interface{}), typs[i])
+				} else {
+					rs[i] = r
 				}
 			}
 			if allOk {

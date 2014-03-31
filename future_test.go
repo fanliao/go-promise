@@ -332,11 +332,11 @@ func TestWhen(t *testing.T) {
 		return f
 	}
 	r, ok := startTwoTask(200, 250).Get()
-	AreEqual(r, []interface{}{[]interface{}{10, "ok", RESULT_SUCCESS}, []interface{}{20, "ok2", RESULT_SUCCESS}}, t)
+	AreEqual(r, []interface{}{[]interface{}{10, "ok"}, []interface{}{20, "ok2"}}, t)
 	AreEqual(ok, RESULT_SUCCESS, t)
 
 	r, ok = startTwoTask(250, 210).Get()
-	AreEqual(r, []interface{}{[]interface{}{10, "ok", RESULT_SUCCESS}, []interface{}{20, "ok2", RESULT_SUCCESS}}, t)
+	AreEqual(r, []interface{}{[]interface{}{10, "ok"}, []interface{}{20, "ok2"}}, t)
 	AreEqual(ok, RESULT_SUCCESS, t)
 
 	r, ok = startTwoTask(-250, 210).Get()
