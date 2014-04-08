@@ -458,7 +458,11 @@ func start(act interface{}, canCancel bool) *Future {
 
 func Wrap(value interface{}) *Future {
 	fu := NewPromise()
-	fu.Reslove(value)
+	if values, ok := value.([]interface{}); ok {
+		fu.Reslove(values...)
+	} else {
+		fu.Reslove(value)
+	}
 	return fu.Future
 }
 
