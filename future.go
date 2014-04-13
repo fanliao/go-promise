@@ -2,6 +2,7 @@ package promise
 
 import (
 	"errors"
+	//"fmt"
 	"sync"
 	"time"
 )
