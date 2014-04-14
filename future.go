@@ -24,8 +24,8 @@ const (
 
 //代表异步任务的结果
 type PromiseResult struct {
-	result []interface{}
-	typ    resultType
+	Result []interface{}
+	Typ    resultType
 }
 
 //处理链式调用
@@ -149,9 +149,9 @@ func (this *Future) GetChan() chan *PromiseResult {
 //如果任务已经完成，后续的Get将直接返回任务结果
 func (this *Future) Get() ([]interface{}, resultType) {
 	if fr, ok := <-this.chOut; ok {
-		return fr.result, fr.typ
+		return fr.Result, fr.Typ
 	} else {
-		r, typ := this.r.result, this.r.typ
+		r, typ := this.r.Result, this.r.Typ
 		return r, typ
 	}
 }
@@ -171,9 +171,9 @@ func (this *Future) GetOrTimeout(mm int) ([]interface{}, resultType, bool) {
 		return nil, 0, true
 	case fr, ok := <-this.chOut:
 		if ok {
-			return fr.result, fr.typ, false
+			return fr.Result, fr.Typ, false
 		} else {
-			r, typ := this.r.result, this.r.typ
+			r, typ := this.r.Result, this.r.Typ
 			return r, typ, false
 		}
 
@@ -218,10 +218,10 @@ func (this *Future) Pipe(callbacks ...(func(v ...interface{}) *Future)) (result 
 		execWithLock(this.lock, func() {
 			if this.r != nil {
 				result = this
-				if this.r.typ == RESULT_SUCCESS && callbacks[0] != nil {
-					result = (callbacks[0](this.r.result...))
-				} else if this.r.typ != RESULT_FAILURE && len(callbacks) > 1 && callbacks[1] != nil {
-					result = (callbacks[1](this.r.result...))
+				if this.r.Typ == RESULT_SUCCESS && callbacks[0] != nil {
+					result = (callbacks[0](this.r.Result...))
+				} else if this.r.Typ != RESULT_FAILURE && len(callbacks) > 1 && callbacks[1] != nil {
+					result = (callbacks[1](this.r.Result...))
 				}
 			} else {
 				this.pipeDoneTask = callbacks[0]
@@ -286,11 +286,11 @@ func (this *Promise) end(r *PromiseResult) (e error) { //r *PromiseResult) {
 		this.chOut <- r
 		close(this.chOut)
 
-		if r.typ != RESULT_CANCELLED {
+		if r.Typ != RESULT_CANCELLED {
 			//任务完成后调用回调函数
 			execCallback(r, this.dones, this.fails, this.always)
 
-			pipeTask, pipePromise := this.getPipe(this.r.typ == RESULT_SUCCESS)
+			pipeTask, pipePromise := this.getPipe(this.r.Typ == RESULT_SUCCESS)
 			this.startPipe(pipeTask, pipePromise)
 		}
 		e = nil
@@ -320,7 +320,7 @@ func (this *Future) startPipe(pipeTask func(v ...interface{}) *Future, pipePromi
 	//处理链式异步任务
 	//var f *Future
 	if pipeTask != nil {
-		f := pipeTask(this.r.result...)
+		f := pipeTask(this.r.Result...)
 		f.Done(func(v ...interface{}) {
 			pipePromise.Reslove(v...)
 		}).Fail(func(v ...interface{}) {
@@ -335,14 +335,14 @@ func (this *Future) startPipe(pipeTask func(v ...interface{}) *Future, pipePromi
 //执行回调函数
 func execCallback(r *PromiseResult, dones []func(v ...interface{}), fails []func(v ...interface{}), always []func(v ...interface{})) {
 	var callbacks []func(v ...interface{})
-	if r.typ == RESULT_SUCCESS {
+	if r.Typ == RESULT_SUCCESS {
 		callbacks = dones
 	} else {
 		callbacks = fails
 	}
 
 	forFs := func(s []func(v ...interface{})) {
-		forSlice(s, func(f func(v ...interface{})) { f(r.result...) })
+		forSlice(s, func(f func(v ...interface{})) { f(r.Result...) })
 	}
 
 	forFs(callbacks)
@@ -366,10 +366,10 @@ func (this *Future) handleOneCallback(callback func(v ...interface{}), t callbac
 		}
 	}
 	finalAction := func(r *PromiseResult) {
-		if (t == CALLBACK_DONE && r.typ == RESULT_SUCCESS) ||
-			(t == CALLBACK_FAIL && r.typ == RESULT_FAILURE) ||
+		if (t == CALLBACK_DONE && r.Typ == RESULT_SUCCESS) ||
+			(t == CALLBACK_FAIL && r.Typ == RESULT_FAILURE) ||
 			(t == CALLBACK_ALWAYS) {
-			callback(r.result...)
+			callback(r.Result...)
 		}
 	}
 	if f := this.addCallback(pendingAction, finalAction); f != nil {
