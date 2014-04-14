@@ -2,6 +2,7 @@ package promise
 
 import (
 	//"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -172,7 +173,7 @@ func TestException(t *testing.T) {
 	task := func() []interface{} {
 		time.Sleep(500 * time.Millisecond)
 		order = append(order, "task be end,")
-		panic("exception")
+		panic("unknown exception")
 		return []interface{}{10, "ok", true}
 	}
 
@@ -180,17 +181,28 @@ func TestException(t *testing.T) {
 		time.Sleep(200 * time.Millisecond)
 		order = append(order, "run Done callback,")
 	}).Always(func(v ...interface{}) {
+		t.Log("alwa")
 		order = append(order, "run Always callback,")
-		AreEqual(v, []interface{}{"exception"}, t)
+		if !strings.Contains(v[0].(error).Error(), "unknown exception") {
+			t.Log("Failed! actual", v[0])
+			t.Fail()
+		}
+		//AreEqual(v, []interface{}{"exception"}, t)
 	}).Fail(func(v ...interface{}) {
 		order = append(order, "run Fail callback,")
-		AreEqual(v, []interface{}{"exception"}, t)
+		if !strings.Contains(v[0].(error).Error(), "unknown exception") {
+			t.Log("Failed! actual", v[0])
+			t.Fail()
+		}
 	})
 
 	r, ok := f.Get()
 	time.Sleep(200 * time.Millisecond)
 	AreEqual(order, []string{"task be end,", "run Fail callback,", "run Always callback,"}, t)
-	AreEqual(r, []interface{}{"exception"}, t)
+	if !strings.Contains(r[0].(error).Error(), "unknown exception") {
+		t.Log("Failed! actual", r[0])
+		t.Fail()
+	}
 	AreEqual(ok, RESULT_FAILURE, t)
 
 }
@@ -340,11 +352,11 @@ func TestWhen(t *testing.T) {
 	AreEqual(ok, RESULT_SUCCESS, t)
 
 	r, ok = startTwoTask(-250, 210).Get()
-	AreEqual(r, []interface{}{[]interface{}{-10, "fail", RESULT_FAILURE}, []interface{}{20, "ok2", RESULT_SUCCESS}}, t)
+	AreEqual(r, []interface{}{PromiseResult{[]interface{}{-10, "fail"}, RESULT_FAILURE}, PromiseResult{[]interface{}{20, "ok2"}, RESULT_SUCCESS}}, t)
 	AreEqual(ok, RESULT_FAILURE, t)
 
 	r, ok = startTwoTask(-250, -210).Get()
-	AreEqual(r, []interface{}{[]interface{}{-10, "fail", RESULT_FAILURE}, []interface{}{-20, "fail2", RESULT_FAILURE}}, t)
+	AreEqual(r, []interface{}{PromiseResult{[]interface{}{-10, "fail"}, RESULT_FAILURE}, PromiseResult{[]interface{}{-20, "fail2"}, RESULT_FAILURE}}, t)
 	AreEqual(ok, RESULT_FAILURE, t)
 
 	r, ok = WhenAll().Get()

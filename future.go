@@ -1,8 +1,11 @@
 package promise
 
 import (
+	"bytes"
 	"errors"
 	//"fmt"
+	"runtime"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -424,7 +427,7 @@ func start(act interface{}, canCancel bool) *Future {
 	go func() {
 		defer func() {
 			if e := recover(); e != nil {
-				fu.Reject(e)
+				fu.Reject(newErrorWithStacks(e))
 			}
 		}()
 
@@ -548,7 +551,7 @@ func WhenAll(fs ...*Future) *Future {
 			}
 			for i, r := range rs {
 				if !allOk {
-					rs[i] = append(r.([]interface{}), typs[i])
+					rs[i] = PromiseResult{r.([]interface{}), typs[i]} //append(r.([]interface{}), typs[i])
 				} else {
 					rs[i] = r
 				}
@@ -585,11 +588,38 @@ func getError(i interface{}) (e error) {
 		switch v := i.(type) {
 		case error:
 			e = v
-		case stringer:
-			e = errors.New(v.String())
+		case string:
+			e = errors.New(v)
 		default:
-			e = errors.New("unknow error")
+			if s, ok := i.(stringer); ok {
+				e = errors.New(s.String())
+			} else {
+				e = errors.New("unknown error")
+			}
 		}
 	}
 	return
+}
+
+func newErrorWithStacks(i interface{}) (e error) {
+	err := getError(i)
+	buf := bytes.NewBufferString(err.Error())
+	buf.WriteString("\n")
+
+	pcs := make([]uintptr, 50)
+	num := runtime.Callers(2, pcs)
+	for _, v := range pcs[0:num] {
+		fun := runtime.FuncForPC(v)
+		file, line := fun.FileLine(v)
+		name := fun.Name()
+		//fmt.Println(name, file + ":", line)
+		writeStrings(buf, []string{name, " ", file, ":", strconv.Itoa(line), "\n"})
+	}
+	return errors.New(buf.String())
+}
+
+func writeStrings(buf *bytes.Buffer, strings []string) {
+	for _, s := range strings {
+		buf.WriteString(s)
+	}
 }
