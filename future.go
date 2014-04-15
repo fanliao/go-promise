@@ -519,6 +519,7 @@ func WhenAny(fs ...*Future) *Future {
 						break
 					}
 				case _ = <-nf.chOut:
+					//if a future be success, will try to cancel oter future
 					for _, f := range fs {
 						if c := f.Canceller(); c != nil {
 							f.RequestCancel()
@@ -543,6 +544,14 @@ func WhenAll(fs ...*Future) *Future {
 			typs := make([]resultType, len(fs), len(fs))
 			allOk := true
 			for i, f := range fs {
+				//if a future be failure, then will try to cancel other futures
+				if !allOk {
+					for j := i; j < len(fs); j++ {
+						if c := fs[j].Canceller(); c != nil {
+							fs[j].RequestCancel()
+						}
+					}
+				}
 				rs[i], typs[i] = f.Get()
 
 				if typs[i] != RESULT_SUCCESS {
