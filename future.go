@@ -3,7 +3,7 @@ package promise
 import (
 	"bytes"
 	"errors"
-	//"fmt"
+	"fmt"
 	"runtime"
 	"strconv"
 	"sync"
@@ -28,13 +28,13 @@ const (
 
 //代表异步任务的结果
 type PromiseResult struct {
-	Result []interface{}
+	Result interface{}
 	Typ    resultType
 }
 
 //处理链式调用
 type pipe struct {
-	pipeDoneTask, pipeFailTask func(v ...interface{}) *Future
+	pipeDoneTask, pipeFailTask func(v interface{}) *Future
 	pipePromise                *Promise
 }
 
@@ -45,18 +45,18 @@ type Promise struct {
 }
 
 //Cancel表示任务正常完成
-func (this *Promise) Cancel(v ...interface{}) (e error) {
+func (this *Promise) Cancel(v interface{}) (e error) {
 	return this.end(&PromiseResult{v, RESULT_CANCELLED})
 }
 
 //Reslove表示任务正常完成
-func (this *Promise) Reslove(v ...interface{}) (e error) {
+func (this *Promise) Reslove(v interface{}) (e error) {
 	return this.end(&PromiseResult{v, RESULT_SUCCESS})
 }
 
 //Reject表示任务失败
-func (this *Promise) Reject(v ...interface{}) (e error) {
-	return this.end(&PromiseResult{v, RESULT_FAILURE})
+func (this *Promise) Reject(err error) (e error) {
+	return this.end(&PromiseResult{err, RESULT_FAILURE})
 }
 
 //Set a Promise can be cancelled
@@ -69,21 +69,21 @@ func (this *Promise) EnableCanceller() *Promise {
 
 //添加一个任务成功完成时的回调，如果任务已经成功完成，则直接执行回调函数
 //传递给Done函数的参数与Reslove函数的参数相同
-func (this *Promise) Done(callback func(v ...interface{})) *Promise {
+func (this *Promise) Done(callback func(v interface{})) *Promise {
 	this.Future.Done(callback)
 	return this
 }
 
 //添加一个任务失败时的回调，如果任务已经失败，则直接执行回调函数
 //传递给Fail函数的参数与Reject函数的参数相同
-func (this *Promise) Fail(callback func(v ...interface{})) *Promise {
+func (this *Promise) Fail(callback func(v interface{})) *Promise {
 	this.Future.Fail(callback)
 	return this
 }
 
 //添加一个回调函数，该函数将在任务完成后执行，无论成功或失败
 //传递给Always回调的参数根据成功或失败状态，与Reslove或Reject函数的参数相同
-func (this *Promise) Always(callback func(v ...interface{})) *Promise {
+func (this *Promise) Always(callback func(v interface{})) *Promise {
 	this.Future.Always(callback)
 	return this
 }
@@ -99,7 +99,7 @@ type Future struct {
 	oncePipe             *sync.Once
 	lock                 *sync.Mutex
 	chOut                chan *PromiseResult
-	dones, fails, always []func(v ...interface{})
+	dones, fails, always []func(v interface{})
 	pipe
 	r          *PromiseResult
 	*canceller //*PromiseCanceller
@@ -151,19 +151,29 @@ func (this *Future) GetChan() chan *PromiseResult {
 
 //Get函数将一直阻塞直到任务完成,并返回任务的结果
 //如果任务已经完成，后续的Get将直接返回任务结果
-func (this *Future) Get() ([]interface{}, resultType) {
+func (this *Future) Get() (interface{}, error) {
 	if fr, ok := <-this.chOut; ok {
-		return fr.Result, fr.Typ
+		return getFutureReturnVal(fr) //fr.Result, fr.Typ
 	} else {
-		r, typ := this.r.Result, this.r.Typ
-		return r, typ
+		//r, typ := this.r.Result, this.r.Typ
+		return getFutureReturnVal(this.r) //r, typ
+	}
+}
+
+func getFutureReturnVal(r *PromiseResult) (interface{}, error) {
+	if r.Typ == RESULT_SUCCESS {
+		return r.Result, nil
+	} else if r.Typ == RESULT_FAILURE {
+		return nil, getError(r.Result)
+	} else {
+		return nil, &CancelledError{}
 	}
 }
 
 //Get函数将一直阻塞直到任务完成或超过指定的Timeout时间
 //如果任务已经完成，后续的Get将直接返回任务结果
 //mm的单位是毫秒
-func (this *Future) GetOrTimeout(mm int) ([]interface{}, resultType, bool) {
+func (this *Future) GetOrTimeout(mm int) (interface{}, error, bool) {
 	if mm == 0 {
 		mm = 10
 	} else {
@@ -172,13 +182,14 @@ func (this *Future) GetOrTimeout(mm int) ([]interface{}, resultType, bool) {
 
 	select {
 	case <-time.After((time.Duration)(mm) * time.Nanosecond):
-		return nil, 0, true
+		return nil, nil, true
 	case fr, ok := <-this.chOut:
 		if ok {
-			return fr.Result, fr.Typ, false
+			r, err := getFutureReturnVal(fr)
+			return r, err, false
 		} else {
-			r, typ := this.r.Result, this.r.Typ
-			return r, typ, false
+			r, err := getFutureReturnVal(this.r)
+			return r, err, false
 		}
 
 	}
@@ -186,21 +197,21 @@ func (this *Future) GetOrTimeout(mm int) ([]interface{}, resultType, bool) {
 
 //添加一个任务成功完成时的回调，如果任务已经成功完成，则直接执行回调函数
 //传递给Done函数的参数与Reslove函数的参数相同
-func (this *Future) Done(callback func(v ...interface{})) *Future {
+func (this *Future) Done(callback func(v interface{})) *Future {
 	this.handleOneCallback(callback, CALLBACK_DONE)
 	return this
 }
 
 //添加一个任务失败时的回调，如果任务已经失败，则直接执行回调函数
 //传递给Fail函数的参数与Reject函数的参数相同
-func (this *Future) Fail(callback func(v ...interface{})) *Future {
+func (this *Future) Fail(callback func(v interface{})) *Future {
 	this.handleOneCallback(callback, CALLBACK_FAIL)
 	return this
 }
 
 //添加一个回调函数，该函数将在任务完成后执行，无论成功或失败
 //传递给Always回调的参数根据成功或失败状态，与Reslove或Reject函数的参数相同
-func (this *Future) Always(callback func(v ...interface{})) *Future {
+func (this *Future) Always(callback func(v interface{})) *Future {
 	this.handleOneCallback(callback, CALLBACK_ALWAYS)
 	return this
 }
@@ -210,7 +221,7 @@ func (this *Future) Always(callback func(v ...interface{})) *Future {
 //链式添加异步任务，可以同时定制Done或Fail状态下的链式异步任务，并返回一个新的异步对象。如果对此对象执行Done，Fail，Always操作，则新的回调函数将会被添加到链式的异步对象中
 //如果调用的参数超过2个，那第2个以后的参数将会被忽略
 //Pipe只能调用一次，第一次后的调用将被忽略
-func (this *Future) Pipe(callbacks ...(func(v ...interface{}) *Future)) (result *Future, ok bool) {
+func (this *Future) Pipe(callbacks ...(func(v interface{}) *Future)) (result *Future, ok bool) {
 	if len(callbacks) == 0 ||
 		(len(callbacks) == 1 && callbacks[0] == nil) ||
 		(len(callbacks) > 1 && callbacks[0] == nil && callbacks[1] == nil) {
@@ -223,9 +234,9 @@ func (this *Future) Pipe(callbacks ...(func(v ...interface{}) *Future)) (result 
 			if this.r != nil {
 				result = this
 				if this.r.Typ == RESULT_SUCCESS && callbacks[0] != nil {
-					result = (callbacks[0](this.r.Result...))
+					result = (callbacks[0](this.r.Result))
 				} else if this.r.Typ != RESULT_FAILURE && len(callbacks) > 1 && callbacks[1] != nil {
-					result = (callbacks[1](this.r.Result...))
+					result = (callbacks[1](this.r.Result))
 				}
 			} else {
 				this.pipeDoneTask = callbacks[0]
@@ -280,7 +291,22 @@ func (this *canceller) IsCancelled() (r bool) {
 //完成一个任务
 func (this *Promise) end(r *PromiseResult) (e error) { //r *PromiseResult) {
 	defer func() {
-		e = getError(recover())
+		if e = getError(recover()); e != nil {
+			//TODO: how to handle the errors appears in callback?
+			fmt.Println("error in end", e)
+
+			buf := bytes.NewBufferString("")
+			pcs := make([]uintptr, 50)
+			num := runtime.Callers(2, pcs)
+			for _, v := range pcs[0:num] {
+				fun := runtime.FuncForPC(v)
+				file, line := fun.FileLine(v)
+				name := fun.Name()
+				//fmt.Println(name, file + ":", line)
+				writeStrings(buf, []string{name, " ", file, ":", strconv.Itoa(line), "\n"})
+			}
+			fmt.Println(buf.String())
+		}
 	}()
 	e = errors.New("Cannot resolve/reject/cancel more than once")
 	this.onceEnd.Do(func() {
@@ -310,7 +336,7 @@ func (this *Promise) setResult(r *PromiseResult) {
 }
 
 //返回与链式调用相关的对象
-func (this *Future) getPipe(isResolved bool) (func(v ...interface{}) *Future, *Promise) {
+func (this *Future) getPipe(isResolved bool) (func(v interface{}) *Future, *Promise) {
 	this.lock.Lock()
 	defer this.lock.Unlock()
 	if isResolved {
@@ -320,15 +346,15 @@ func (this *Future) getPipe(isResolved bool) (func(v ...interface{}) *Future, *P
 	}
 }
 
-func (this *Future) startPipe(pipeTask func(v ...interface{}) *Future, pipePromise *Promise) {
+func (this *Future) startPipe(pipeTask func(v interface{}) *Future, pipePromise *Promise) {
 	//处理链式异步任务
 	//var f *Future
 	if pipeTask != nil {
-		f := pipeTask(this.r.Result...)
-		f.Done(func(v ...interface{}) {
-			pipePromise.Reslove(v...)
-		}).Fail(func(v ...interface{}) {
-			pipePromise.Reject(v...)
+		f := pipeTask(this.r.Result)
+		f.Done(func(v interface{}) {
+			pipePromise.Reslove(v)
+		}).Fail(func(v interface{}) {
+			pipePromise.Reject(getError(v))
 		})
 		//} else {
 		//	f = this
@@ -337,16 +363,16 @@ func (this *Future) startPipe(pipeTask func(v ...interface{}) *Future, pipePromi
 }
 
 //执行回调函数
-func execCallback(r *PromiseResult, dones []func(v ...interface{}), fails []func(v ...interface{}), always []func(v ...interface{})) {
-	var callbacks []func(v ...interface{})
+func execCallback(r *PromiseResult, dones []func(v interface{}), fails []func(v interface{}), always []func(v interface{})) {
+	var callbacks []func(v interface{})
 	if r.Typ == RESULT_SUCCESS {
 		callbacks = dones
 	} else {
 		callbacks = fails
 	}
 
-	forFs := func(s []func(v ...interface{})) {
-		forSlice(s, func(f func(v ...interface{})) { f(r.Result...) })
+	forFs := func(s []func(v interface{})) {
+		forSlice(s, func(f func(v interface{})) { f(r.Result) })
 	}
 
 	forFs(callbacks)
@@ -355,7 +381,7 @@ func execCallback(r *PromiseResult, dones []func(v ...interface{}), fails []func
 }
 
 //处理单个回调函数的添加请求
-func (this *Future) handleOneCallback(callback func(v ...interface{}), t callbackType) {
+func (this *Future) handleOneCallback(callback func(v interface{}), t callbackType) {
 	if callback == nil {
 		return
 	}
@@ -373,7 +399,7 @@ func (this *Future) handleOneCallback(callback func(v ...interface{}), t callbac
 		if (t == CALLBACK_DONE && r.Typ == RESULT_SUCCESS) ||
 			(t == CALLBACK_FAIL && r.Typ == RESULT_FAILURE) ||
 			(t == CALLBACK_ALWAYS) {
-			callback(r.Result...)
+			callback(r.Result)
 		}
 	}
 	if f := this.addCallback(pendingAction, finalAction); f != nil {
@@ -394,25 +420,25 @@ func (this *Future) addCallback(pendingAction func(), finalAction func(*PromiseR
 	return
 }
 
-func StartCanCancel(action func(canceller Canceller) []interface{}) *Future {
+func StartCanCancel(action func(canceller Canceller) (interface{}, error)) *Future {
 	return start(action, true)
 }
 
-func Start(action func() []interface{}) *Future {
+func Start(action func() (interface{}, error)) *Future {
 	return start(action, false)
 }
 
 func StartCanCancel0(action func(canceller Canceller)) *Future {
-	return start(func(canceller Canceller) []interface{} {
+	return start(func(canceller Canceller) (interface{}, error) {
 		action(canceller)
-		return make([]interface{}, 0, 0)
+		return nil, nil
 	}, true)
 }
 
 func Start0(action func()) *Future {
-	return start(func() []interface{} {
+	return start(func() (interface{}, error) {
 		action()
-		return make([]interface{}, 0, 0)
+		return nil, nil
 	}, false)
 }
 
@@ -431,29 +457,35 @@ func start(act interface{}, canCancel bool) *Future {
 			}
 		}()
 
-		var r []interface{}
+		var r interface{}
+		var err error
 		if canCancel {
-			r = (act.(func(canceller Canceller) []interface{}))(fu.Canceller())
+			r, err = (act.(func(canceller Canceller) (interface{}, error)))(fu.Canceller())
 		} else {
-			r = (act.(func() []interface{}))()
+			r, err = (act.(func() (interface{}, error)))()
 		}
 
 		if fu.IsCancelled() {
-			fu.Cancel(r...)
+			fu.Cancel(r)
 		} else {
-			if l := len(r); l > 0 {
-				if done, ok := r[l-1].(bool); ok {
-					if done {
-						fu.Reslove(r[:l-1]...)
-					} else {
-						fu.Reject(r[:l-1]...)
-					}
-				} else {
-					fu.Reslove(r...)
-				}
+			if err == nil {
+				fu.Reslove(r)
 			} else {
-				fu.Reslove(r...)
+				fu.Reject(err)
 			}
+			//if l := len(r); l > 0 {
+			//	if done, ok := r[l-1].(bool); ok {
+			//		if done {
+			//			fu.Reslove(r[:l-1]...)
+			//		} else {
+			//			fu.Reject(r[:l-1]...)
+			//		}
+			//	} else {
+			//		fu.Reslove(r...)
+			//	}
+			//} else {
+			//	fu.Reslove(r...)
+			//}
 		}
 	}()
 
@@ -462,11 +494,11 @@ func start(act interface{}, canCancel bool) *Future {
 
 func Wrap(value interface{}) *Future {
 	fu := NewPromise()
-	if values, ok := value.([]interface{}); ok {
-		fu.Reslove(values...)
-	} else {
-		fu.Reslove(value)
-	}
+	fu.Reslove(value)
+	//if values, ok := value.([]interface{}); ok {
+	//	fu.Reslove(values...)
+	//} else {
+	//}
 	return fu.Future
 }
 
@@ -476,9 +508,9 @@ func NewPromise() *Promise {
 		&Future{
 			new(sync.Once), new(sync.Mutex),
 			make(chan *PromiseResult, 1),
-			make([]func(v ...interface{}), 0, 8),
-			make([]func(v ...interface{}), 0, 8),
-			make([]func(v ...interface{}), 0, 4),
+			make([]func(v interface{}), 0, 8),
+			make([]func(v interface{}), 0, 8),
+			make([]func(v interface{}), 0, 4),
 			pipe{}, nil, nil,
 		},
 	}
@@ -486,36 +518,36 @@ func NewPromise() *Promise {
 }
 
 type anyPromiseResult struct {
-	result []interface{}
+	result interface{}
 	i      int
 }
 
 //产生一个新的Promise，如果列表中任意1个Promise完成，则Promise完成, 否则将触发Reject，参数为包含所有Promise的Reject返回值的slice
 func WhenAny(fs ...*Future) *Future {
 	nf := NewPromise()
-	errors := make([]interface{}, len(fs), len(fs))
+	errs := make([]error, len(fs))
 	chFails := make(chan anyPromiseResult)
 
 	for i, f := range fs {
 		k := i
-		f.Done(func(v ...interface{}) {
-			nf.Reslove(v...)
-		}).Fail(func(v ...interface{}) {
+		f.Done(func(v interface{}) {
+			nf.Reslove(v)
+		}).Fail(func(v interface{}) {
 			chFails <- anyPromiseResult{v, k}
 		})
 	}
 
 	if len(fs) == 0 {
-		nf.Reslove()
+		nf.Reslove(nil)
 	} else {
 		go func() {
 			j := 0
 			for {
 				select {
 				case r := <-chFails:
-					errors[r.i] = r.result
+					errs[r.i] = getError(r.result)
 					if j++; j == len(fs) {
-						nf.Reject(errors...)
+						nf.Reject(newAggregateError("Error appears in WhenAny:", errs))
 						break
 					}
 				case _ = <-nf.chOut:
@@ -537,11 +569,11 @@ func WhenAny(fs ...*Future) *Future {
 func WhenAll(fs ...*Future) *Future {
 	f := NewPromise()
 	if len(fs) == 0 {
-		f.Reslove()
+		f.Reslove(nil)
 	} else {
 		go func() {
-			rs := make([]interface{}, len(fs), len(fs))
-			typs := make([]resultType, len(fs), len(fs))
+			rs := make([]interface{}, len(fs))
+			errs := make([]error, len(fs))
 			allOk := true
 			for i, f := range fs {
 				//if a future be failure, then will try to cancel other futures
@@ -552,23 +584,23 @@ func WhenAll(fs ...*Future) *Future {
 						}
 					}
 				}
-				rs[i], typs[i] = f.Get()
+				rs[i], errs[i] = f.Get()
 
-				if typs[i] != RESULT_SUCCESS {
+				if errs[i] != nil {
 					allOk = false
 				}
 			}
 			for i, r := range rs {
-				if !allOk {
-					rs[i] = PromiseResult{r.([]interface{}), typs[i]} //append(r.([]interface{}), typs[i])
-				} else {
+				if allOk {
 					rs[i] = r
+				} else {
+					rs[i] = errs[i] //append(r.([]interface{}), typs[i])
 				}
 			}
 			if allOk {
-				f.Reslove(rs...)
+				f.Reslove(rs)
 			} else {
-				f.Reject(rs...)
+				f.Reject(newAggregateError("Error appears in WhenAll:", errs))
 			}
 		}()
 	}
@@ -582,12 +614,13 @@ func execWithLock(lock *sync.Mutex, act func()) {
 	act()
 }
 
-func forSlice(s []func(v ...interface{}), f func(func(v ...interface{}))) {
+func forSlice(s []func(v interface{}), f func(func(v interface{}))) {
 	for _, e := range s {
 		f(e)
 	}
 }
 
+//Error handling struct and functions------------------------------
 type stringer interface {
 	String() string
 }
@@ -603,11 +636,45 @@ func getError(i interface{}) (e error) {
 			if s, ok := i.(stringer); ok {
 				e = errors.New(s.String())
 			} else {
-				e = errors.New("unknown error")
+				e = errors.New(fmt.Sprintf("%v", i))
 			}
 		}
 	}
 	return
+}
+
+type CancelledError struct {
+}
+
+func (e *CancelledError) Error() string {
+	return "Task be cancelled"
+}
+
+type AggregateError struct {
+	s         string
+	InnerErrs []error
+}
+
+func (e *AggregateError) Error() string {
+	if e.InnerErrs == nil {
+		return e.s
+	} else {
+		buf := bytes.NewBufferString(e.s)
+		buf.WriteString("\n\n")
+		for i, ie := range e.InnerErrs {
+			buf.WriteString("error appears in Future ")
+			buf.WriteString(strconv.Itoa(i))
+			buf.WriteString(": ")
+			buf.WriteString(ie.Error())
+			buf.WriteString("\n")
+		}
+		buf.WriteString("\n")
+		return buf.String()
+	}
+}
+
+func newAggregateError(s string, innerErrors []error) *AggregateError {
+	return &AggregateError{newErrorWithStacks(s).Error(), innerErrors}
 }
 
 func newErrorWithStacks(i interface{}) (e error) {
