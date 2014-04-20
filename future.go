@@ -146,6 +146,15 @@ func (this *Future) IsCancelled() bool {
 }
 
 func (this *Future) GetChan() chan *PromiseResult {
+	//out := make(chan *PromiseResult)
+	//go func() {
+	//	_, _ = this.Get()
+	//	fmt.Println("\ngetchan:--------", *this.r)
+	//	out <- this.r
+	//	fmt.Println("\ngetchan done:-----------")
+	//	close(out)
+	//}()
+	//return out
 	return this.chOut
 }
 
@@ -473,19 +482,6 @@ func start(act interface{}, canCancel bool) *Future {
 			} else {
 				fu.Reject(err)
 			}
-			//if l := len(r); l > 0 {
-			//	if done, ok := r[l-1].(bool); ok {
-			//		if done {
-			//			fu.Reslove(r[:l-1]...)
-			//		} else {
-			//			fu.Reject(r[:l-1]...)
-			//		}
-			//	} else {
-			//		fu.Reslove(r...)
-			//	}
-			//} else {
-			//	fu.Reslove(r...)
-			//}
 		}
 	}()
 
@@ -495,10 +491,6 @@ func start(act interface{}, canCancel bool) *Future {
 func Wrap(value interface{}) *Future {
 	fu := NewPromise()
 	fu.Reslove(value)
-	//if values, ok := value.([]interface{}); ok {
-	//	fu.Reslove(values...)
-	//} else {
-	//}
 	return fu.Future
 }
 
