@@ -50,7 +50,7 @@ func (this *Promise) Cancel(v interface{}) (e error) {
 }
 
 //Reslove表示任务正常完成
-func (this *Promise) Reslove(v interface{}) (e error) {
+func (this *Promise) Resolve(v interface{}) (e error) {
 	return this.end(&PromiseResult{v, RESULT_SUCCESS})
 }
 
@@ -352,7 +352,7 @@ func (this *Future) startPipe(pipeTask func(v interface{}) *Future, pipePromise 
 	if pipeTask != nil {
 		f := pipeTask(this.r.Result)
 		f.Done(func(v interface{}) {
-			pipePromise.Reslove(v)
+			pipePromise.Resolve(v)
 		}).Fail(func(v interface{}) {
 			pipePromise.Reject(getError(v))
 		})
@@ -469,22 +469,22 @@ func start(act interface{}, canCancel bool) *Future {
 			fu.Cancel(r)
 		} else {
 			if err == nil {
-				fu.Reslove(r)
+				fu.Resolve(r)
 			} else {
 				fu.Reject(err)
 			}
 			//if l := len(r); l > 0 {
 			//	if done, ok := r[l-1].(bool); ok {
 			//		if done {
-			//			fu.Reslove(r[:l-1]...)
+			//			fu.Resolve(r[:l-1]...)
 			//		} else {
 			//			fu.Reject(r[:l-1]...)
 			//		}
 			//	} else {
-			//		fu.Reslove(r...)
+			//		fu.Resolve(r...)
 			//	}
 			//} else {
-			//	fu.Reslove(r...)
+			//	fu.Resolve(r...)
 			//}
 		}
 	}()
@@ -494,9 +494,9 @@ func start(act interface{}, canCancel bool) *Future {
 
 func Wrap(value interface{}) *Future {
 	fu := NewPromise()
-	fu.Reslove(value)
+	fu.Resolve(value)
 	//if values, ok := value.([]interface{}); ok {
-	//	fu.Reslove(values...)
+	//	fu.Resolve(values...)
 	//} else {
 	//}
 	return fu.Future
@@ -531,14 +531,14 @@ func WhenAny(fs ...*Future) *Future {
 	for i, f := range fs {
 		k := i
 		f.Done(func(v interface{}) {
-			nf.Reslove(v)
+			nf.Resolve(v)
 		}).Fail(func(v interface{}) {
 			chFails <- anyPromiseResult{v, k}
 		})
 	}
 
 	if len(fs) == 0 {
-		nf.Reslove(nil)
+		nf.Resolve(nil)
 	} else {
 		go func() {
 			j := 0
@@ -569,7 +569,7 @@ func WhenAny(fs ...*Future) *Future {
 func WhenAll(fs ...*Future) *Future {
 	f := NewPromise()
 	if len(fs) == 0 {
-		f.Reslove(nil)
+		f.Resolve(nil)
 	} else {
 		go func() {
 			rs := make([]interface{}, len(fs))
@@ -598,7 +598,7 @@ func WhenAll(fs ...*Future) *Future {
 				}
 			}
 			if allOk {
-				f.Reslove(rs)
+				f.Resolve(rs)
 			} else {
 				f.Reject(newAggregateError("Error appears in WhenAll:", errs))
 			}
