@@ -291,25 +291,27 @@ func (this *canceller) IsCancelled() (r bool) {
 //完成一个任务
 func (this *Promise) end(r *PromiseResult) (e error) { //r *PromiseResult) {
 	defer func() {
-		if e = getError(recover()); e != nil {
+		if err := getError(recover()); err != nil {
+			e = err
 			//TODO: how to handle the errors appears in callback?
-			fmt.Println("error in end", e)
+			//fmt.Println("error in end", e)
 
-			buf := bytes.NewBufferString("")
-			pcs := make([]uintptr, 50)
-			num := runtime.Callers(2, pcs)
-			for _, v := range pcs[0:num] {
-				fun := runtime.FuncForPC(v)
-				file, line := fun.FileLine(v)
-				name := fun.Name()
-				//fmt.Println(name, file + ":", line)
-				writeStrings(buf, []string{name, " ", file, ":", strconv.Itoa(line), "\n"})
-			}
-			fmt.Println(buf.String())
+			//buf := bytes.NewBufferString("")
+			//pcs := make([]uintptr, 50)
+			//num := runtime.Callers(2, pcs)
+			//for _, v := range pcs[0:num] {
+			//	fun := runtime.FuncForPC(v)
+			//	file, line := fun.FileLine(v)
+			//	name := fun.Name()
+			//	//fmt.Println(name, file + ":", line)
+			//	writeStrings(buf, []string{name, " ", file, ":", strconv.Itoa(line), "\n"})
+			//}
+			//fmt.Println(buf.String())
 		}
 	}()
 	e = errors.New("Cannot resolve/reject/cancel more than once")
 	this.onceEnd.Do(func() {
+		//fmt.Println("send future result", r)
 		this.setResult(r)
 
 		//让Get函数可以返回
@@ -317,9 +319,11 @@ func (this *Promise) end(r *PromiseResult) (e error) { //r *PromiseResult) {
 		close(this.chOut)
 
 		if r.Typ != RESULT_CANCELLED {
+			//fmt.Println("begin callback ", r)
 			//任务完成后调用回调函数
 			execCallback(r, this.dones, this.fails, this.always)
 
+			//fmt.Println("after callback", r)
 			pipeTask, pipePromise := this.getPipe(this.r.Typ == RESULT_SUCCESS)
 			this.startPipe(pipeTask, pipePromise)
 		}
@@ -453,6 +457,7 @@ func start(act interface{}, canCancel bool) *Future {
 	go func() {
 		defer func() {
 			if e := recover(); e != nil {
+				//fmt.Println("reject2", newErrorWithStacks(e))
 				fu.Reject(newErrorWithStacks(e))
 			}
 		}()
@@ -471,6 +476,7 @@ func start(act interface{}, canCancel bool) *Future {
 			if err == nil {
 				fu.Resolve(r)
 			} else {
+				//fmt.Println("reject1===", err, "\n")
 				fu.Reject(err)
 			}
 			//if l := len(r); l > 0 {
@@ -600,7 +606,10 @@ func WhenAll(fs ...*Future) *Future {
 			if allOk {
 				f.Resolve(rs)
 			} else {
-				f.Reject(newAggregateError("Error appears in WhenAll:", errs))
+				//fmt.Println("whenall reject", errs)
+				e := newAggregateError("Error appears in WhenAll:", errs)
+				//fmt.Println("whenall reject2", e.Error())
+				f.Reject(e)
 			}
 		}()
 	}
@@ -662,6 +671,9 @@ func (e *AggregateError) Error() string {
 		buf := bytes.NewBufferString(e.s)
 		buf.WriteString("\n\n")
 		for i, ie := range e.InnerErrs {
+			if ie == nil {
+				continue
+			}
 			buf.WriteString("error appears in Future ")
 			buf.WriteString(strconv.Itoa(i))
 			buf.WriteString(": ")
@@ -674,6 +686,8 @@ func (e *AggregateError) Error() string {
 }
 
 func newAggregateError(s string, innerErrors []error) *AggregateError {
+	//fmt.Println("newAggregateError", innerErrors)
+	//fmt.Println("newAggregateError, newErrorWithStacks", newErrorWithStacks(s).Error())
 	return &AggregateError{newErrorWithStacks(s).Error(), innerErrors}
 }
 
