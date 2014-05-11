@@ -530,19 +530,70 @@ type anyPromiseResult struct {
 
 //产生一个新的Promise，如果列表中任意1个Promise完成，则Promise完成, 否则将触发Reject，参数为包含所有Promise的Reject返回值的slice
 func WhenAny(fs ...*Future) *Future {
-	nf := NewPromise()
-	errs := make([]error, len(fs))
-	chFails := make(chan anyPromiseResult)
+	//nf := NewPromise()
+	//errs := make([]error, len(fs))
+	//chFails := make(chan anyPromiseResult)
+
+	//for i, f := range fs {
+	//	k := i
+	//	f.Done(func(v interface{}) {
+	//		nf.Resolve(v)
+	//	}).Fail(func(v interface{}) {
+	//		chFails <- anyPromiseResult{v, k}
+	//	})
+	//}
+
+	//if len(fs) == 0 {
+	//	nf.Resolve(nil)
+	//} else {
+	//	go func() {
+	//		j := 0
+	//		for {
+	//			select {
+	//			case r := <-chFails:
+	//				errs[r.i] = getError(r.result)
+	//				if j++; j == len(fs) {
+	//					nf.Reject(newAggregateError("Error appears in WhenAny:", errs))
+	//					break
+	//				}
+	//			case _ = <-nf.chOut:
+	//				//if a future be success, will try to cancel oter future
+	//				for _, f := range fs {
+	//					if c := f.Canceller(); c != nil {
+	//						f.RequestCancel()
+	//					}
+	//				}
+	//				break
+	//			}
+	//		}
+	//	}()
+	//}
+	//return nf.Future
+	return WhenAnyTrue(nil, fs...)
+}
+
+//产生一个新的Promise，如果列表中任意1个Promise完成并且返回值符合条件，则Promise完成并返回true
+//如果所有Promise完成并且返回值都不符合条件，则Promise完成并返回false,
+//否则将触发Reject，参数为包含所有Promise的Reject返回值的slice
+func WhenAnyTrue(predicate func(interface{}) bool, fs ...*Future) *Future {
+	if predicate == nil {
+		predicate = func(v interface{}) bool { return true }
+	}
+
+	nf, rs := NewPromise(), make([]interface{}, len(fs))
+	chFails, chDones := make(chan anyPromiseResult), make(chan anyPromiseResult)
 
 	for i, f := range fs {
 		k := i
 		f.Done(func(v interface{}) {
-			nf.Resolve(v)
+			//nf.Resolve(v)
+			chDones <- anyPromiseResult{v, k}
 		}).Fail(func(v interface{}) {
 			chFails <- anyPromiseResult{v, k}
 		})
 	}
 
+	var result interface{}
 	if len(fs) == 0 {
 		nf.Resolve(nil)
 	} else {
@@ -551,21 +602,53 @@ func WhenAny(fs ...*Future) *Future {
 			for {
 				select {
 				case r := <-chFails:
-					errs[r.i] = getError(r.result)
-					if j++; j == len(fs) {
-						nf.Reject(newAggregateError("Error appears in WhenAny:", errs))
-						break
-					}
-				case _ = <-nf.chOut:
-					//if a future be success, will try to cancel oter future
-					for _, f := range fs {
-						if c := f.Canceller(); c != nil {
-							f.RequestCancel()
+					fmt.Println("get err")
+					rs[r.i] = getError(r.result)
+				case r := <-chDones:
+					if predicate(r.result) {
+						//try to cancel other futures
+						for _, f := range fs {
+							if c := f.Canceller(); c != nil {
+								f.RequestCancel()
+							}
 						}
+
+						//close the channel for avoid the send side be blocked
+						closeChan := func(c chan anyPromiseResult) {
+							defer func() { _ = recover() }()
+							close(c)
+						}
+						closeChan(chDones)
+						closeChan(chFails)
+
+						//Resolve the future and return result
+						result = r.result
+						nf.Resolve(result)
+						return
+					} else {
+						rs[r.i] = r.result
+					}
+				}
+
+				if j++; j == len(fs) {
+					errs, k := make([]error, j), 0
+					for _, r := range rs {
+						switch val := r.(type) {
+						case error:
+							errs[k] = val
+							k++
+						default:
+						}
+					}
+					if k > 0 {
+						nf.Reject(newAggregateError("Error appears in WhenAnyTrue:", errs[0:j]))
+					} else {
+						nf.Resolve(false)
 					}
 					break
 				}
 			}
+
 		}()
 	}
 	return nf.Future
