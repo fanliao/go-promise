@@ -453,6 +453,7 @@ func start(act interface{}, canCancel bool) *Future {
 	if canCancel {
 		fu.EnableCanceller()
 	}
+	//stack := newErrorWithStacks(errors.New("test!!!!!!"))
 
 	go func() {
 		defer func() {
@@ -471,9 +472,11 @@ func start(act interface{}, canCancel bool) *Future {
 		}
 
 		if fu.IsCancelled() {
+			//fmt.Println("cancel", r)
 			fu.Cancel(r)
 		} else {
 			if err == nil {
+				//fmt.Println("resolve", r, stack)
 				fu.Resolve(r)
 			} else {
 				//fmt.Println("reject1===", err, "\n")
@@ -598,13 +601,21 @@ func WhenAnyTrue(predicate func(interface{}) bool, fs ...*Future) *Future {
 		nf.Resolve(nil)
 	} else {
 		go func() {
+			defer func() {
+				if e := recover(); e != nil {
+					fmt.Println("reject2", newErrorWithStacks(e))
+					nf.Reject(newErrorWithStacks(e))
+				}
+			}()
 			j := 0
+			//fmt.Println("start for")
 			for {
 				select {
 				case r := <-chFails:
-					fmt.Println("get err")
+					//fmt.Println("get err")
 					rs[r.i] = getError(r.result)
 				case r := <-chDones:
+					//fmt.Println("get return", r)
 					if predicate(r.result) {
 						//try to cancel other futures
 						for _, f := range fs {
@@ -631,6 +642,7 @@ func WhenAnyTrue(predicate func(interface{}) bool, fs ...*Future) *Future {
 				}
 
 				if j++; j == len(fs) {
+					fmt.Println("receive all")
 					errs, k := make([]error, j), 0
 					for _, r := range rs {
 						switch val := r.(type) {
@@ -648,6 +660,7 @@ func WhenAnyTrue(predicate func(interface{}) bool, fs ...*Future) *Future {
 					break
 				}
 			}
+			//fmt.Println("exit start")
 
 		}()
 	}
