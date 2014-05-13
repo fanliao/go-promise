@@ -50,7 +50,7 @@ func (this *Promise) Cancel(v interface{}) (e error) {
 }
 
 //Reslove表示任务正常完成
-func (this *Promise) Reslove(v interface{}) (e error) {
+func (this *Promise) Resolve(v interface{}) (e error) {
 	return this.end(&PromiseResult{v, RESULT_SUCCESS})
 }
 
@@ -300,25 +300,27 @@ func (this *canceller) IsCancelled() (r bool) {
 //完成一个任务
 func (this *Promise) end(r *PromiseResult) (e error) { //r *PromiseResult) {
 	defer func() {
-		if e = getError(recover()); e != nil {
+		if err := getError(recover()); err != nil {
+			e = err
 			//TODO: how to handle the errors appears in callback?
-			fmt.Println("error in end", e)
+			//fmt.Println("error in end", e)
 
-			buf := bytes.NewBufferString("")
-			pcs := make([]uintptr, 50)
-			num := runtime.Callers(2, pcs)
-			for _, v := range pcs[0:num] {
-				fun := runtime.FuncForPC(v)
-				file, line := fun.FileLine(v)
-				name := fun.Name()
-				//fmt.Println(name, file + ":", line)
-				writeStrings(buf, []string{name, " ", file, ":", strconv.Itoa(line), "\n"})
-			}
-			fmt.Println(buf.String())
+			//buf := bytes.NewBufferString("")
+			//pcs := make([]uintptr, 50)
+			//num := runtime.Callers(2, pcs)
+			//for _, v := range pcs[0:num] {
+			//	fun := runtime.FuncForPC(v)
+			//	file, line := fun.FileLine(v)
+			//	name := fun.Name()
+			//	//fmt.Println(name, file + ":", line)
+			//	writeStrings(buf, []string{name, " ", file, ":", strconv.Itoa(line), "\n"})
+			//}
+			//fmt.Println(buf.String())
 		}
 	}()
 	e = errors.New("Cannot resolve/reject/cancel more than once")
 	this.onceEnd.Do(func() {
+		//fmt.Println("send future result", r)
 		this.setResult(r)
 
 		//让Get函数可以返回
@@ -326,9 +328,11 @@ func (this *Promise) end(r *PromiseResult) (e error) { //r *PromiseResult) {
 		close(this.chOut)
 
 		if r.Typ != RESULT_CANCELLED {
+			//fmt.Println("begin callback ", r)
 			//任务完成后调用回调函数
 			execCallback(r, this.dones, this.fails, this.always)
 
+			//fmt.Println("after callback", r)
 			pipeTask, pipePromise := this.getPipe(this.r.Typ == RESULT_SUCCESS)
 			this.startPipe(pipeTask, pipePromise)
 		}
@@ -361,7 +365,7 @@ func (this *Future) startPipe(pipeTask func(v interface{}) *Future, pipePromise 
 	if pipeTask != nil {
 		f := pipeTask(this.r.Result)
 		f.Done(func(v interface{}) {
-			pipePromise.Reslove(v)
+			pipePromise.Resolve(v)
 		}).Fail(func(v interface{}) {
 			pipePromise.Reject(getError(v))
 		})
@@ -458,10 +462,12 @@ func start(act interface{}, canCancel bool) *Future {
 	if canCancel {
 		fu.EnableCanceller()
 	}
+	//stack := newErrorWithStacks(errors.New("test!!!!!!"))
 
 	go func() {
 		defer func() {
 			if e := recover(); e != nil {
+				//fmt.Println("reject2", newErrorWithStacks(e))
 				fu.Reject(newErrorWithStacks(e))
 			}
 		}()
@@ -475,11 +481,14 @@ func start(act interface{}, canCancel bool) *Future {
 		}
 
 		if fu.IsCancelled() {
+			//fmt.Println("cancel", r)
 			fu.Cancel(r)
 		} else {
 			if err == nil {
-				fu.Reslove(r)
+				//fmt.Println("resolve", r, stack)
+				fu.Resolve(r)
 			} else {
+				//fmt.Println("reject1===", err, "\n")
 				fu.Reject(err)
 			}
 		}
@@ -490,7 +499,7 @@ func start(act interface{}, canCancel bool) *Future {
 
 func Wrap(value interface{}) *Future {
 	fu := NewPromise()
-	fu.Reslove(value)
+	fu.Resolve(value)
 	return fu.Future
 }
 
@@ -516,42 +525,135 @@ type anyPromiseResult struct {
 
 //产生一个新的Promise，如果列表中任意1个Promise完成，则Promise完成, 否则将触发Reject，参数为包含所有Promise的Reject返回值的slice
 func WhenAny(fs ...*Future) *Future {
-	nf := NewPromise()
-	errs := make([]error, len(fs))
-	chFails := make(chan anyPromiseResult)
+	//nf := NewPromise()
+	//errs := make([]error, len(fs))
+	//chFails := make(chan anyPromiseResult)
+
+	//for i, f := range fs {
+	//	k := i
+	//	f.Done(func(v interface{}) {
+	//		nf.Resolve(v)
+	//	}).Fail(func(v interface{}) {
+	//		chFails <- anyPromiseResult{v, k}
+	//	})
+	//}
+
+	//if len(fs) == 0 {
+	//	nf.Resolve(nil)
+	//} else {
+	//	go func() {
+	//		j := 0
+	//		for {
+	//			select {
+	//			case r := <-chFails:
+	//				errs[r.i] = getError(r.result)
+	//				if j++; j == len(fs) {
+	//					nf.Reject(newAggregateError("Error appears in WhenAny:", errs))
+	//					break
+	//				}
+	//			case _ = <-nf.chOut:
+	//				//if a future be success, will try to cancel oter future
+	//				for _, f := range fs {
+	//					if c := f.Canceller(); c != nil {
+	//						f.RequestCancel()
+	//					}
+	//				}
+	//				break
+	//			}
+	//		}
+	//	}()
+	//}
+	//return nf.Future
+	return WhenAnyTrue(nil, fs...)
+}
+
+//产生一个新的Promise，如果列表中任意1个Promise完成并且返回值符合条件，则Promise完成并返回true
+//如果所有Promise完成并且返回值都不符合条件，则Promise完成并返回false,
+//否则将触发Reject，参数为包含所有Promise的Reject返回值的slice
+func WhenAnyTrue(predicate func(interface{}) bool, fs ...*Future) *Future {
+	if predicate == nil {
+		predicate = func(v interface{}) bool { return true }
+	}
+
+	nf, rs := NewPromise(), make([]interface{}, len(fs))
+	chFails, chDones := make(chan anyPromiseResult), make(chan anyPromiseResult)
 
 	for i, f := range fs {
 		k := i
 		f.Done(func(v interface{}) {
-			nf.Reslove(v)
+			//nf.Resolve(v)
+			chDones <- anyPromiseResult{v, k}
 		}).Fail(func(v interface{}) {
 			chFails <- anyPromiseResult{v, k}
 		})
 	}
 
+	var result interface{}
 	if len(fs) == 0 {
-		nf.Reslove(nil)
+		nf.Resolve(nil)
 	} else {
 		go func() {
+			defer func() {
+				if e := recover(); e != nil {
+					fmt.Println("reject2", newErrorWithStacks(e))
+					nf.Reject(newErrorWithStacks(e))
+				}
+			}()
 			j := 0
+			//fmt.Println("start for")
 			for {
 				select {
 				case r := <-chFails:
-					errs[r.i] = getError(r.result)
-					if j++; j == len(fs) {
-						nf.Reject(newAggregateError("Error appears in WhenAny:", errs))
-						break
-					}
-				case _ = <-nf.chOut:
-					//if a future be success, will try to cancel oter future
-					for _, f := range fs {
-						if c := f.Canceller(); c != nil {
-							f.RequestCancel()
+					//fmt.Println("get err")
+					rs[r.i] = getError(r.result)
+				case r := <-chDones:
+					//fmt.Println("get return", r)
+					if predicate(r.result) {
+						//try to cancel other futures
+						for _, f := range fs {
+							if c := f.Canceller(); c != nil {
+								f.RequestCancel()
+							}
 						}
+
+						//close the channel for avoid the send side be blocked
+						closeChan := func(c chan anyPromiseResult) {
+							defer func() { _ = recover() }()
+							close(c)
+						}
+						closeChan(chDones)
+						closeChan(chFails)
+
+						//Resolve the future and return result
+						result = r.result
+						nf.Resolve(result)
+						return
+					} else {
+						rs[r.i] = r.result
+					}
+				}
+
+				if j++; j == len(fs) {
+					fmt.Println("receive all")
+					errs, k := make([]error, j), 0
+					for _, r := range rs {
+						switch val := r.(type) {
+						case error:
+							errs[k] = val
+							k++
+						default:
+						}
+					}
+					if k > 0 {
+						nf.Reject(newAggregateError("Error appears in WhenAnyTrue:", errs[0:j]))
+					} else {
+						nf.Resolve(false)
 					}
 					break
 				}
 			}
+			//fmt.Println("exit start")
+
 		}()
 	}
 	return nf.Future
@@ -561,7 +663,7 @@ func WhenAny(fs ...*Future) *Future {
 func WhenAll(fs ...*Future) *Future {
 	f := NewPromise()
 	if len(fs) == 0 {
-		f.Reslove(nil)
+		f.Resolve(nil)
 	} else {
 		go func() {
 			rs := make([]interface{}, len(fs))
@@ -590,9 +692,12 @@ func WhenAll(fs ...*Future) *Future {
 				}
 			}
 			if allOk {
-				f.Reslove(rs)
+				f.Resolve(rs)
 			} else {
-				f.Reject(newAggregateError("Error appears in WhenAll:", errs))
+				//fmt.Println("whenall reject", errs)
+				e := newAggregateError("Error appears in WhenAll:", errs)
+				//fmt.Println("whenall reject2", e.Error())
+				f.Reject(e)
 			}
 		}()
 	}
@@ -654,6 +759,9 @@ func (e *AggregateError) Error() string {
 		buf := bytes.NewBufferString(e.s)
 		buf.WriteString("\n\n")
 		for i, ie := range e.InnerErrs {
+			if ie == nil {
+				continue
+			}
 			buf.WriteString("error appears in Future ")
 			buf.WriteString(strconv.Itoa(i))
 			buf.WriteString(": ")
@@ -666,6 +774,8 @@ func (e *AggregateError) Error() string {
 }
 
 func newAggregateError(s string, innerErrors []error) *AggregateError {
+	//fmt.Println("newAggregateError", innerErrors)
+	//fmt.Println("newAggregateError, newErrorWithStacks", newErrorWithStacks(s).Error())
 	return &AggregateError{newErrorWithStacks(s).Error(), innerErrors}
 }
 

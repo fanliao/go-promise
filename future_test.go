@@ -329,6 +329,87 @@ func TestWhenAny(t *testing.T) {
 	//AreEqual(c1, true, t)
 }
 
+func TestWhenAnyTrue(t *testing.T) {
+	c1, c2 := false, false
+	startTwoCanCancelTask := func(t1 int, t2 int, predicate func(interface{}) bool) *Future {
+		timeout1 := time.Duration(t1)
+		timeout2 := time.Duration(t2)
+		task1 := func(canceller Canceller) (r interface{}, err error) {
+			for i := 0; i < 10; i++ {
+				if timeout1 > 0 {
+					time.Sleep(timeout1 * time.Millisecond)
+				} else {
+					time.Sleep((-1 * timeout1) * time.Millisecond)
+				}
+				if canceller.IsCancellationRequested() {
+					t.Log("cancel 1")
+					canceller.SetCancelled()
+					c1 = true
+					return nil, nil
+				}
+			}
+			if timeout1 > 0 {
+				return 10, nil
+			} else {
+				return nil, newMyError(-10)
+			}
+		}
+		task2 := func(canceller Canceller) (r interface{}, err error) {
+			for i := 0; i < 10; i++ {
+				if timeout2 > 0 {
+					time.Sleep(timeout2 * time.Millisecond)
+				} else {
+					time.Sleep((-1 * timeout2) * time.Millisecond)
+				}
+				if canceller.IsCancellationRequested() {
+					t.Log("cancel 2")
+					canceller.SetCancelled()
+					c2 = true
+					return nil, nil
+				}
+			}
+			if timeout2 > 0 {
+				return 20, nil
+			} else {
+				return nil, newMyError(-20)
+			}
+		}
+		f := WhenAnyTrue(predicate, StartCanCancel(task1), StartCanCancel(task2))
+		return f
+	}
+	//第一个任务先完成，第二个后完成，并且设定条件为返回值==第一个的返回值
+	r, err := startTwoCanCancelTask(30, 250, func(v interface{}) bool { return v.(int) == 10 }).Get()
+	AreEqual(r, 10, t)
+	AreEqual(err, nil, t)
+
+	time.Sleep(1000 * time.Millisecond)
+	AreEqual(c2, true, t)
+
+	//第一个任务后完成，第二个先完成，并且设定条件为返回值==第二个的返回值
+	c1, c2 = false, false
+	r, err = startTwoCanCancelTask(250, 30, func(v interface{}) bool { return v.(int) == 20 }).Get()
+	AreEqual(r, 20, t)
+	AreEqual(err, nil, t)
+
+	time.Sleep(1000 * time.Millisecond)
+	AreEqual(c1, true, t)
+
+	//第一个任务后完成，第二个先完成，并且设定条件为返回值不等于任意一个任务的返回值
+	c1, c2 = false, false
+	r, err = startTwoCanCancelTask(10, 250, func(v interface{}) bool { return v.(int) == 200 }).Get()
+	AreEqual(r, false, t)
+	AreEqual(err, nil, t)
+
+	time.Sleep(1000 * time.Millisecond)
+	AreEqual(c1, false, t)
+	AreEqual(c2, false, t)
+
+	//r, ok = startTwoCanCancelTask(280, 15).Get()
+	//AreEqual(r, []interface{}{20, "ok2"}, t)
+	//AreEqual(ok, RESULT_SUCCESS, t)
+	//AreEqual(c1, true, t)
+}
+
 func TestWhenAll(t *testing.T) {
 	startTwoTask := func(t1 int, t2 int) *Future {
 		timeout1 := time.Duration(t1)
