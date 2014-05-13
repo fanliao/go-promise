@@ -578,15 +578,19 @@ func WhenAnyTrue(predicate func(interface{}) bool, fs ...*Future) *Future {
 	nf, rs := NewPromise(), make([]interface{}, len(fs))
 	chFails, chDones := make(chan anyPromiseResult), make(chan anyPromiseResult)
 
-	for i, f := range fs {
-		k := i
-		f.Done(func(v interface{}) {
-			//nf.Resolve(v)
-			chDones <- anyPromiseResult{v, k}
-		}).Fail(func(v interface{}) {
-			chFails <- anyPromiseResult{v, k}
-		})
-	}
+	go func() {
+		for i, f := range fs {
+			k := i
+			f.Done(func(v interface{}) {
+				//nf.Resolve(v)
+				defer func() { _ = recover() }()
+				chDones <- anyPromiseResult{v, k}
+			}).Fail(func(v interface{}) {
+				defer func() { _ = recover() }()
+				chFails <- anyPromiseResult{v, k}
+			})
+		}
+	}()
 
 	var result interface{}
 	if len(fs) == 0 {
@@ -634,7 +638,7 @@ func WhenAnyTrue(predicate func(interface{}) bool, fs ...*Future) *Future {
 				}
 
 				if j++; j == len(fs) {
-					fmt.Println("receive all")
+					//fmt.Println("receive all")
 					errs, k := make([]error, j), 0
 					for _, r := range rs {
 						switch val := r.(type) {
