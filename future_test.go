@@ -314,7 +314,7 @@ func TestWhenAny(t *testing.T) {
 				return nil, newMyError([]interface{}{-20, "fail2"})
 			}
 		}
-		f := WhenAny(StartCanCancel(task1), StartCanCancel(task2))
+		f := WhenAny(Start(task1), Start(task2))
 		return f
 	}
 	r, err = startTwoCanCancelTask(10, 250).Get()
@@ -374,7 +374,7 @@ func TestWhenAnyTrue(t *testing.T) {
 				return nil, newMyError(-20)
 			}
 		}
-		f := WhenAnyTrue(predicate, StartCanCancel(task1), StartCanCancel(task2))
+		f := WhenAnyTrue(predicate, Start(task1), Start(task2))
 		return f
 	}
 	//第一个任务先完成，第二个后完成，并且设定条件为返回值==第一个的返回值
@@ -432,7 +432,7 @@ func TestWhenAll(t *testing.T) {
 				return nil, newMyError([]interface{}{-20, "fail2"})
 			}
 		}
-		f := WhenAll(Start(task1), Start(task2))
+		f := WhenAllFuture(Start(task1), Start(task2))
 		return f
 	}
 	r, err := startTwoTask(200, 250).Get()
@@ -453,14 +453,14 @@ func TestWhenAll(t *testing.T) {
 	AreEqual(err.(*AggregateError).InnerErrs[1].(*myError).val, []interface{}{-20, "fail2"}, t)
 	AreEqual(r, nil, t)
 
-	r, err = WhenAll().Get()
-	AreEqual(r, nil, t)
+	r, err = WhenAllFuture().Get()
+	AreEqual(r, []interface{}{}, t)
 	AreEqual(err, nil, t)
 
 }
 
 func TestWrap(t *testing.T) {
-	r, err := Wrap(10).Get()
+	r, err := Start(10).Get()
 	AreEqual(r, 10, t)
 	AreEqual(err, nil, t)
 
@@ -479,7 +479,7 @@ func TestCancel(t *testing.T) {
 		panic("exception")
 	}
 
-	f := StartCanCancel(task)
+	f := Start(task)
 	f.RequestCancel()
 	r, err := f.Get()
 	AreEqual(f.IsCancelled(), true, t)
@@ -490,7 +490,7 @@ func TestCancel(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 		return 1, nil
 	}
-	f = StartCanCancel(task)
+	f = Start(task)
 	c := f.RequestCancel()
 	AreEqual(c, true, t)
 	r, err = f.Get()
