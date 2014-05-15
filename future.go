@@ -7,7 +7,9 @@ import (
 	"runtime"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
+	"unsafe"
 )
 
 type callbackType int
@@ -62,7 +64,7 @@ func (this *Promise) Reject(err error) (e error) {
 //Set a Promise can be cancelled
 func (this *Promise) EnableCanceller() *Promise {
 	if this.canceller == nil {
-		this.canceller = &canceller{new(sync.Mutex), false, false}
+		this.canceller = &canceller{}
 	}
 	return this
 }
@@ -162,8 +164,10 @@ func (this *Future) GetChan() chan *PromiseResult {
 //如果任务已经完成，后续的Get将直接返回任务结果
 func (this *Future) Get() (interface{}, error) {
 	if fr, ok := <-this.chOut; ok {
+		//fmt.Println("get done1", fr)
 		return getFutureReturnVal(fr) //fr.Result, fr.Typ
 	} else {
+		//fmt.Println("get done2", this.r)
 		//r, typ := this.r.Result, this.r.Typ
 		return getFutureReturnVal(this.r) //r, typ
 	}
@@ -239,62 +243,83 @@ func (this *Future) Pipe(callbacks ...(func(v interface{}) *Future)) (result *Fu
 	}
 
 	this.oncePipe.Do(func() {
-		execWithLock(this.lock, func() {
-			if this.r != nil {
-				result = this
-				if this.r.Typ == RESULT_SUCCESS && callbacks[0] != nil {
-					result = (callbacks[0](this.r.Result))
-				} else if this.r.Typ != RESULT_FAILURE && len(callbacks) > 1 && callbacks[1] != nil {
-					result = (callbacks[1](this.r.Result))
-				}
-			} else {
+		rp := unsafe.Pointer(this.r)
+		r := atomic.LoadPointer(&rp)
+		if r != nil {
+			result = this
+			if this.r.Typ == RESULT_SUCCESS && callbacks[0] != nil {
+				result = (callbacks[0](this.r.Result))
+			} else if this.r.Typ != RESULT_FAILURE && len(callbacks) > 1 && callbacks[1] != nil {
+				result = (callbacks[1](this.r.Result))
+			}
+		} else {
+			execWithLock(this.lock, func() {
 				this.pipeDoneTask = callbacks[0]
 				if len(callbacks) > 1 {
 					this.pipeFailTask = callbacks[1]
 				}
 				this.pipePromise = NewPromise()
 				result = this.pipePromise.Future
-			}
-		})
+			})
+		}
+		//execWithLock(this.lock, func() {
+		//	if this.r != nil {
+		//		result = this
+		//		if this.r.Typ == RESULT_SUCCESS && callbacks[0] != nil {
+		//			result = (callbacks[0](this.r.Result))
+		//		} else if this.r.Typ != RESULT_FAILURE && len(callbacks) > 1 && callbacks[1] != nil {
+		//			result = (callbacks[1](this.r.Result))
+		//		}
+		//	} else {
+		//		this.pipeDoneTask = callbacks[0]
+		//		if len(callbacks) > 1 {
+		//			this.pipeFailTask = callbacks[1]
+		//		}
+		//		this.pipePromise = NewPromise()
+		//		result = this.pipePromise.Future
+		//	}
+		//})
 		ok = true
 	})
 	return
 }
 
 type canceller struct {
-	lockC       *sync.Mutex
-	isRequested bool
-	isCancelled bool
+	//lockC       *sync.Mutex
+	isRequested int32
+	isCancelled int32
 }
 
 //Cancel任务
 func (this *canceller) RequestCancel() {
-	execWithLock(this.lockC, func() {
-		this.isRequested = true
-	})
+	//execWithLock(this.lockC, func() {
+	//	this.isRequested = true
+	//})
+	atomic.StoreInt32(&this.isRequested, 1)
 }
 
 //已经被要求取消任务
 func (this *canceller) IsCancellationRequested() (r bool) {
-	execWithLock(this.lockC, func() {
-		r = this.isRequested
-	})
-	return
+	//execWithLock(this.lockC, func() {
+	//	r = this.isRequested
+	//})
+	return atomic.LoadInt32(&this.isRequested) == 1
 }
 
 //设置任务已经被Cancel
 func (this *canceller) SetCancelled() {
-	execWithLock(this.lockC, func() {
-		this.isCancelled = true
-	})
+	//execWithLock(this.lockC, func() {
+	//	this.isCancelled = true
+	//})
+	atomic.StoreInt32(&this.isCancelled, 1)
 }
 
 //任务已经被Cancel
 func (this *canceller) IsCancelled() (r bool) {
-	execWithLock(this.lockC, func() {
-		r = this.isCancelled
-	})
-	return
+	//execWithLock(this.lockC, func() {
+	//	r = this.isCancelled
+	//})
+	return atomic.LoadInt32(&this.isCancelled) == 1
 }
 
 //完成一个任务
@@ -323,9 +348,12 @@ func (this *Promise) end(r *PromiseResult) (e error) { //r *PromiseResult) {
 		//fmt.Println("send future result", r)
 		this.setResult(r)
 
+		//fmt.Println("send", r)
 		//让Get函数可以返回
 		this.chOut <- r
+		//fmt.Println("send done", r)
 		close(this.chOut)
+		//fmt.Println("close done", r)
 
 		if r.Typ != RESULT_CANCELLED {
 			//fmt.Println("begin callback ", r)
@@ -346,6 +374,9 @@ func (this *Promise) setResult(r *PromiseResult) {
 	this.lock.Lock()
 	defer this.lock.Unlock()
 	this.r = r
+	//rp := unsafe.Pointer(this.r)
+	//atomic.StorePointer(&rp, unsafe.Pointer(r))
+	//fmt.Println("set done")
 }
 
 //返回与链式调用相关的对象
@@ -721,7 +752,7 @@ func WhenAnyTrue(predicate func(interface{}) bool, fs ...*Future) *Future {
 		go func() {
 			defer func() {
 				if e := recover(); e != nil {
-					fmt.Println("reject2", newErrorWithStacks(e))
+					//fmt.Println("reject2", newErrorWithStacks(e))
 					nf.Reject(newErrorWithStacks(e))
 				}
 			}()
@@ -821,20 +852,8 @@ func WaitAll(acts ...interface{}) (fu *Future) {
 		return
 	}
 
-	paralActs := acts[0 : len(acts)-1]
-	fs := make([]*Future, len(paralActs))
-	//if runLastInCurr != nil && len(runLastInCurr) > 0 && runLastInCurr[0]{
-	//	for i, act := range acts[0:len(acts) -1] {
-	//		fs[i] = Start(act)
-	//	}
-	//	fs = fs[0:len(acts) -1]
-	//	f := WhenAllFuture(fs...)
-	//
-	//} else {
-	for i, act := range paralActs {
-		fs[i] = Start(act)
-	}
-	f1 := WhenAllFuture(fs...)
+	//paralActs := acts[0 : len(acts)-1]
+	f1 := WhenAll(acts[0 : len(acts)-1]...)
 
 	p := NewPromise()
 	r, err := getAct(p, acts[len(acts)-1])()
@@ -868,19 +887,16 @@ func WhenAll(acts ...interface{}) (fu *Future) {
 	}
 
 	fs := make([]*Future, len(acts))
-	//if runLastInCurr != nil && len(runLastInCurr) > 0 && runLastInCurr[0]{
-	//	for i, act := range acts[0:len(acts) -1] {
-	//		fs[i] = Start(act)
-	//	}
-	//	fs = fs[0:len(acts) -1]
-	//	f := WhenAllFuture(fs...)
-	//
-	//} else {
 	for i, act := range acts {
 		fs[i] = Start(act)
 	}
 	fu = WhenAllFuture(fs...)
+	//fs := make([]*Future, len(paralActs))
+
+	//for i, act := range paralActs {
+	//	fs[i] = Start(act)
 	//}
+	//f1 := WhenAllFuture(fs...)
 	return
 }
 
@@ -888,42 +904,51 @@ func WhenAll(acts ...interface{}) (fu *Future) {
 func WhenAllFuture(fs ...*Future) *Future {
 	f := NewPromise()
 	rs := make([]interface{}, len(fs))
-	errs := make([]error, len(fs))
+	errs := make([]error, 0, len(fs))
 
 	if len(fs) == 0 {
 		f.Resolve([]interface{}{})
-	} else if len(fs) == 1 {
-		rs[0], errs[0] = fs[0].Get()
-		if errs[0] == nil {
-			f.Resolve(rs)
-		} else {
-			f.Reject(newAggregateError("Error appears in WhenAll:", errs))
-		}
+	//} else if len(fs) == 1 {
+	//	r, err := fs[0].Get()
+	//	if err == nil {
+	//		rs[0] = r
+	//		f.Resolve(rs)
+	//	} else {
+	//		errs = append(errs, err)
+	//		f.Reject(newAggregateError("Error appears in WhenAll:", errs))
+	//	}
 	} else {
 		go func() {
 			allOk := true
+			cancelRequested := false
 			for i, f := range fs {
 				//if a future be failure, then will try to cancel other futures
-				if !allOk {
+				if !allOk && !cancelRequested {
 					for j := i; j < len(fs); j++ {
 						if c := fs[j].Canceller(); c != nil {
 							fs[j].RequestCancel()
 						}
 					}
+					cancelRequested = true
+					//have capture the error in before Future, so will discards the other Future
+					break
 				}
-				rs[i], errs[i] = f.Get()
-
-				if errs[i] != nil {
+				r, err := f.Get()
+				if err != nil {
 					allOk = false
+					errs = append(errs, err)
+					break
 				}
+				rs[i] = r
+
 			}
-			for i, r := range rs {
-				if allOk {
-					rs[i] = r
-				} else {
-					rs[i] = errs[i] //append(r.([]interface{}), typs[i])
-				}
-			}
+			//for i, r := range rs {
+			//	if allOk {
+			//		rs[i] = r
+			//	} else {
+			//		rs[i] = errs[i] //append(r.([]interface{}), typs[i])
+			//	}
+			//}
 			if allOk {
 				f.Resolve(rs)
 			} else {
