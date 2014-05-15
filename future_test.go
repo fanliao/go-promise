@@ -460,7 +460,7 @@ func TestWhenAll(t *testing.T) {
 }
 
 func TestWrap(t *testing.T) {
-	r, err := Start(10).Get()
+	r, err := Wrap(10).Get()
 	AreEqual(r, 10, t)
 	AreEqual(err, nil, t)
 

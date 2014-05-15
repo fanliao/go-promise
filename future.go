@@ -492,11 +492,21 @@ func Start(act interface{}, syncs ...bool) *Future {
 	//stack := newErrorWithStacks(errors.New("test!!!!!!"))*/
 
 	pr := NewPromise()
-	if f, ok := act.(*Future); ok{
+	if f, ok := act.(*Future); ok {
 		return f
 	}
+	switch v := act.(type) {
+	case func(Canceller) (interface{}, error):
+		pr.EnableCanceller()
+		_ = v
+	case func(Canceller):
+		pr.EnableCanceller()
+		_ = v
+	}
+
+	action := getAct(pr, act)
 	if syncs != nil && len(syncs) > 0 && !syncs[0] {
-		r, err := execute0(pr, act)
+		r, err := action()
 		if pr.IsCancelled() {
 			//fmt.Println("cancel", r)
 			pr.Cancel(r)
@@ -511,7 +521,7 @@ func Start(act interface{}, syncs ...bool) *Future {
 		}
 	} else {
 		go func() {
-			r, err := execute0(pr, act)
+			r, err := action()
 			if pr.IsCancelled() {
 				//fmt.Println("cancel", r)
 				pr.Cancel(r)
@@ -531,7 +541,7 @@ func Start(act interface{}, syncs ...bool) *Future {
 }
 
 //执行一个函数或直接返回一个值，如果是可Cancel的函数，需要传递canceller对象
-func execute0(pr *Promise, act interface{}) (r interface{}, err error){
+func getAct(pr *Promise, act interface{}) (f func() (r interface{}, err error)) {
 	var (
 		act1 func() (interface{}, error)
 		act2 func(Canceller) (interface{}, error)
@@ -556,18 +566,22 @@ func execute0(pr *Promise, act interface{}) (r interface{}, err error){
 			return nil, nil
 		}
 	default:
-		r = v
-		return
+		//r = v
+		//return
 	}
-	
+
 	var canceller Canceller = nil
-	if pr != nil {
+	if pr != nil && canCancel {
+		pr.EnableCanceller()
 		canceller = pr.Canceller()
 	}
-	return execute(canceller, act1, act2, canCancel)
+	f = func() (r interface{}, err error) {
+		return execute(canceller, act1, act2, canCancel)
+	}
+	return
 }
 
-func execute(canceller Canceller, act func() (interface{}, error), actCancel func(Canceller) (interface{}, error), canCancel bool) (r interface{}, err error){
+func execute(canceller Canceller, act func() (interface{}, error), actCancel func(Canceller) (interface{}, error), canCancel bool) (r interface{}, err error) {
 
 	defer func() {
 		if e := recover(); e != nil {
@@ -586,14 +600,14 @@ func execute(canceller Canceller, act func() (interface{}, error), actCancel fun
 	return
 }
 
-func Wrap(value interface{}, err error) *Future {
+func Wrap(value interface{}) *Future {
 	pr := NewPromise()
-	if err == nil{
+	if e, ok := value.(error); !ok {
 		pr.Resolve(value)
 	} else {
-		pr.Reject(err)
+		pr.Reject(e)
 	}
-	
+
 	return pr.Future
 }
 
@@ -775,7 +789,7 @@ func WhenAnyTrue(predicate func(interface{}) bool, fs ...*Future) *Future {
 		pr.Resolve([]interface{}{})
 		return
 	}
-	
+
 	f = WhenAll(acts[0:len(acts)-1])
 	r, err := execute(acts[len(acts)-1])
 	fu = pr.Future
@@ -786,18 +800,63 @@ func WhenAnyTrue(predicate func(interface{}) bool, fs ...*Future) *Future {
 	//	for i, act := range acts[0:len(acts) -1] {
 	//		fs[i] = Start(act)
 	//	}
-	//	fs = fs[0:len(acts) -1] 
+	//	fs = fs[0:len(acts) -1]
 	//	f := WhenAllFuture(fs...)
-	//	
+	//
 	//} else {
 		for i, act := range acts {
 			fs[i] = Start(act)
 		}
 		fu = WhenAllFuture(fs...)
 	//}
-	return 
+	return
 }*/
 
+func WaitAll(acts ...interface{}) (fu *Future) {
+	pr := NewPromise()
+	fu = pr.Future
+
+	if len(acts) == 0 {
+		pr.Resolve([]interface{}{})
+		return
+	}
+
+	paralActs := acts[0 : len(acts)-1]
+	fs := make([]*Future, len(paralActs))
+	//if runLastInCurr != nil && len(runLastInCurr) > 0 && runLastInCurr[0]{
+	//	for i, act := range acts[0:len(acts) -1] {
+	//		fs[i] = Start(act)
+	//	}
+	//	fs = fs[0:len(acts) -1]
+	//	f := WhenAllFuture(fs...)
+	//
+	//} else {
+	for i, act := range paralActs {
+		fs[i] = Start(act)
+	}
+	f1 := WhenAllFuture(fs...)
+
+	p := NewPromise()
+	r, err := getAct(p, acts[len(acts)-1])()
+
+	r1, err1 := f1.Get()
+	if err != nil || err1 != nil {
+		errs := newAggregateError("Error appears in WhenAll:", make([]error, 0, len(acts)))
+		if err1 != nil {
+			errs.InnerErrs = append(errs.InnerErrs, (err1.(*AggregateError).InnerErrs)...)
+		}
+		if err != nil {
+			errs.InnerErrs = append(errs.InnerErrs, err)
+		}
+		pr.Reject(errs)
+	} else {
+		rs := r1.([]interface{})
+		rs = append(rs, r)
+		pr.Resolve(rs)
+	}
+	//}
+	return
+}
 
 func WhenAll(acts ...interface{}) (fu *Future) {
 	pr := NewPromise()
@@ -813,16 +872,16 @@ func WhenAll(acts ...interface{}) (fu *Future) {
 	//	for i, act := range acts[0:len(acts) -1] {
 	//		fs[i] = Start(act)
 	//	}
-	//	fs = fs[0:len(acts) -1] 
+	//	fs = fs[0:len(acts) -1]
 	//	f := WhenAllFuture(fs...)
-	//	
+	//
 	//} else {
-		for i, act := range acts {
-			fs[i] = Start(act)
-		}
-		fu = WhenAllFuture(fs...)
+	for i, act := range acts {
+		fs[i] = Start(act)
+	}
+	fu = WhenAllFuture(fs...)
 	//}
-	return 
+	return
 }
 
 //产生一个新的Future，如果列表中所有Future都成功完成，则Promise成功完成，否则失败
