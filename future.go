@@ -9,7 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	//"unsafe"
+	"unsafe"
 )
 
 type callbackType int
@@ -103,12 +103,14 @@ type Future struct {
 	chOut                chan *PromiseResult
 	dones, fails, always []func(v interface{})
 	pipe
-	r          *PromiseResult
+	//r          *PromiseResult
+	r          unsafe.Pointer
 	*canceller //*PromiseCanceller
 }
 
 func (this *Future) result() *PromiseResult {
-	return this.r
+	r := atomic.LoadPointer(&this.r)
+	return (*PromiseResult)(r)
 }
 
 //获取Canceller接口，在异步任务内可以通过此对象查询任务是否已经被取消
@@ -374,9 +376,10 @@ func (this *Promise) end(r *PromiseResult) (e error) { //r *PromiseResult) {
 
 //set this.r
 func (this *Promise) setResult(r *PromiseResult) {
-	this.lock.Lock()
-	defer this.lock.Unlock()
-	this.r = r
+	//this.lock.Lock()
+	//defer this.lock.Unlock()
+	//this.r = r
+	atomic.StorePointer(&this.r, unsafe.Pointer(r))
 	//rp := unsafe.Pointer(this.r)
 	//atomic.StorePointer(&rp, unsafe.Pointer(r))
 	//fmt.Println("set done", this.r, r)
@@ -456,15 +459,16 @@ func (this *Future) handleOneCallback(callback func(v interface{}), t callbackTy
 
 //添加回调函数的框架函数
 func (this *Future) addCallback(pendingAction func(), finalAction func(*PromiseResult)) (fun func()) {
-	execWithLock(this.lock, func() {
-		r := this.result()
-		if r == nil {
+	r := this.result()
+	if r == nil {
+		execWithLock(this.lock, func() {
 			pendingAction()
-			fun = nil
-		} else {
-			fun = func() { finalAction(r) }
-		}
-	})
+		})
+		fun = nil
+	} else {
+		fun = func() { finalAction(r) }
+	}
+
 	return
 }
 
