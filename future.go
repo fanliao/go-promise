@@ -9,7 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unsafe"
+	//"unsafe"
 )
 
 type callbackType int
@@ -107,6 +107,10 @@ type Future struct {
 	*canceller //*PromiseCanceller
 }
 
+func (this *Future) result() *PromiseResult {
+	return this.r
+}
+
 //获取Canceller接口，在异步任务内可以通过此对象查询任务是否已经被取消
 func (this *Future) Canceller() Canceller {
 	return this.canceller
@@ -114,7 +118,7 @@ func (this *Future) Canceller() Canceller {
 
 //取消异步任务
 func (this *Future) RequestCancel() bool {
-	if this.r != nil || this.canceller == nil {
+	if this.result() != nil || this.canceller == nil {
 		return false
 	} else {
 		this.canceller.RequestCancel()
@@ -133,7 +137,7 @@ func (this *Future) IsCancellationRequested() bool {
 
 //设置任务为已被取消状态
 func (this *Future) SetCancelled() {
-	if this.canceller != nil && this.r == nil {
+	if this.canceller != nil && this.result() == nil {
 		this.canceller.SetCancelled()
 	}
 }
@@ -169,7 +173,7 @@ func (this *Future) Get() (interface{}, error) {
 	} else {
 		//fmt.Println("get done2", this.r)
 		//r, typ := this.r.Result, this.r.Typ
-		return getFutureReturnVal(this.r) //r, typ
+		return getFutureReturnVal(this.result()) //r, typ
 	}
 }
 
@@ -201,7 +205,7 @@ func (this *Future) GetOrTimeout(mm int) (interface{}, error, bool) {
 			r, err := getFutureReturnVal(fr)
 			return r, err, false
 		} else {
-			r, err := getFutureReturnVal(this.r)
+			r, err := getFutureReturnVal(this.result())
 			return r, err, false
 		}
 
@@ -243,14 +247,13 @@ func (this *Future) Pipe(callbacks ...(func(v interface{}) *Future)) (result *Fu
 	}
 
 	this.oncePipe.Do(func() {
-		rp := unsafe.Pointer(this.r)
-		r := atomic.LoadPointer(&rp)
+		r := this.result()
 		if r != nil {
 			result = this
-			if this.r.Typ == RESULT_SUCCESS && callbacks[0] != nil {
-				result = (callbacks[0](this.r.Result))
-			} else if this.r.Typ != RESULT_FAILURE && len(callbacks) > 1 && callbacks[1] != nil {
-				result = (callbacks[1](this.r.Result))
+			if r.Typ == RESULT_SUCCESS && callbacks[0] != nil {
+				result = (callbacks[0](r.Result))
+			} else if r.Typ != RESULT_FAILURE && len(callbacks) > 1 && callbacks[1] != nil {
+				result = (callbacks[1](r.Result))
 			}
 		} else {
 			execWithLock(this.lock, func() {
@@ -361,7 +364,7 @@ func (this *Promise) end(r *PromiseResult) (e error) { //r *PromiseResult) {
 			execCallback(r, this.dones, this.fails, this.always)
 
 			//fmt.Println("after callback", r)
-			pipeTask, pipePromise := this.getPipe(this.r.Typ == RESULT_SUCCESS)
+			pipeTask, pipePromise := this.getPipe(r.Typ == RESULT_SUCCESS)
 			this.startPipe(pipeTask, pipePromise)
 		}
 		e = nil
@@ -376,7 +379,7 @@ func (this *Promise) setResult(r *PromiseResult) {
 	this.r = r
 	//rp := unsafe.Pointer(this.r)
 	//atomic.StorePointer(&rp, unsafe.Pointer(r))
-	//fmt.Println("set done")
+	//fmt.Println("set done", this.r, r)
 }
 
 //返回与链式调用相关的对象
@@ -394,7 +397,7 @@ func (this *Future) startPipe(pipeTask func(v interface{}) *Future, pipePromise 
 	//处理链式异步任务
 	//var f *Future
 	if pipeTask != nil {
-		f := pipeTask(this.r.Result)
+		f := pipeTask(this.result().Result)
 		f.Done(func(v interface{}) {
 			pipePromise.Resolve(v)
 		}).Fail(func(v interface{}) {
@@ -452,13 +455,14 @@ func (this *Future) handleOneCallback(callback func(v interface{}), t callbackTy
 }
 
 //添加回调函数的框架函数
-func (this *Future) addCallback(pendingAction func(), finalAction func(*PromiseResult)) (r func()) {
+func (this *Future) addCallback(pendingAction func(), finalAction func(*PromiseResult)) (fun func()) {
 	execWithLock(this.lock, func() {
-		if this.r == nil {
+		r := this.result()
+		if r == nil {
 			pendingAction()
-			r = nil
+			fun = nil
 		} else {
-			r = func() { finalAction(this.r) }
+			fun = func() { finalAction(r) }
 		}
 	})
 	return
@@ -908,15 +912,15 @@ func WhenAllFuture(fs ...*Future) *Future {
 
 	if len(fs) == 0 {
 		f.Resolve([]interface{}{})
-	//} else if len(fs) == 1 {
-	//	r, err := fs[0].Get()
-	//	if err == nil {
-	//		rs[0] = r
-	//		f.Resolve(rs)
-	//	} else {
-	//		errs = append(errs, err)
-	//		f.Reject(newAggregateError("Error appears in WhenAll:", errs))
-	//	}
+		//} else if len(fs) == 1 {
+		//	r, err := fs[0].Get()
+		//	if err == nil {
+		//		rs[0] = r
+		//		f.Resolve(rs)
+		//	} else {
+		//		errs = append(errs, err)
+		//		f.Reject(newAggregateError("Error appears in WhenAll:", errs))
+		//	}
 	} else {
 		go func() {
 			allOk := true
