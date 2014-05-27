@@ -115,6 +115,7 @@ func TestCancel1(t *testing.T) {
 func TestGetOrTimeOut(t *testing.T) {
 	p := NewPromise()
 	go func() {
+		_, _ = <-time.After((time.Duration)50 * time.Millisecond)
 		time.Sleep(50 * time.Millisecond)
 		p.Resolve("ok")
 	}()
