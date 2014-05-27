@@ -114,9 +114,9 @@ func TestCancel1(t *testing.T) {
 
 func TestGetOrTimeOut(t *testing.T) {
 	p := NewPromise()
+	timout := 50 * time.Millisecond
 	go func() {
-		_, _ = <-time.After((time.Duration)50 * time.Millisecond)
-		time.Sleep(50 * time.Millisecond)
+		<-time.After(timout)
 		p.Resolve("ok")
 	}()
 	c.Convey("When Future is unfinished", t, func() {
@@ -134,7 +134,7 @@ func TestGetOrTimeOut(t *testing.T) {
 
 	p = NewPromise()
 	go func() {
-		time.Sleep(50 * time.Millisecond)
+		<-time.After(timout)
 		p.Reject(errors.New("fail"))
 	}()
 	c.Convey("When Future is rejected", t, func() {
@@ -146,7 +146,44 @@ func TestGetOrTimeOut(t *testing.T) {
 
 	p = NewPromise()
 	go func() {
-		time.Sleep(50 * time.Millisecond)
+		<-time.After(timout)
+		p.Cancel()
+	}()
+	c.Convey("When Future is cancelled", t, func() {
+		r, err, timeout := p.GetOrTimeout(53)
+		c.So(timeout, c.ShouldEqual, false)
+		c.So(r, c.ShouldBeNil)
+		c.So(err, c.ShouldHaveSameTypeAs, &CancelledError{})
+	})
+}
+
+func TestGetChan(t *testing.T) {
+	p := NewPromise()
+	timout := 50 * time.Millisecond
+	go func() {
+		<-time.After(timout)
+		p.Resolve("ok")
+	}()
+	c.Convey("When Future is resolved", t, func() {
+		fr, ok := p.GetChan()
+		c.So(fr.Result, c.ShouldEqual, "ok")
+		c.So(ok, c.ShouldBeTrue)
+	})
+
+	p = NewPromise()
+	go func() {
+		<-time.After(timout)
+		p.Reject(errors.New("fail"))
+	}()
+	c.Convey("When Future is rejected", t, func() {
+		fr, ok := p.GetChan()
+		c.So(fr.Result, c.ShouldImplement)
+		c.So(ok, c.ShouldBeTrue)
+	})
+
+	p = NewPromise()
+	go func() {
+		<-time.After(timout)
 		p.Cancel()
 	}()
 	c.Convey("When Future is cancelled", t, func() {
