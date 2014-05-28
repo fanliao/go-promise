@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	c "github.com/smartystreets/goconvey/convey"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -400,7 +401,7 @@ func TestPipeWhenDone(t *testing.T) {
 		c.So(ok, c.ShouldEqual, true)
 	})
 
-	c.Convey("test pipe two", t, func() {
+	c.Convey("test pipe twice", t, func() {
 		p := NewPromise()
 		_, ok := p.Pipe(taskDonePipe, taskFailPipe)
 		c.So(ok, c.ShouldEqual, true)
@@ -410,7 +411,7 @@ func TestPipeWhenDone(t *testing.T) {
 }
 
 func TestGetOrTimeout(t *testing.T) {
-	tObj = t
+	/*tObj = t
 	order = make([]string, 0, 10)
 	AreEqual(order, []string{}, t)
 	f := Start(taskDone)
@@ -433,7 +434,7 @@ func TestGetOrTimeout(t *testing.T) {
 	r, err, timeout = f.GetOrTimeout(0)
 	AreEqual(timeout, false, t)
 	AreEqual(r, "ok", t)
-	AreEqual(err, nil, t)
+	AreEqual(err, nil, t)*/
 }
 
 func TestException(t *testing.T) {
@@ -475,110 +476,111 @@ func TestException(t *testing.T) {
 }
 
 func TestWhenAny(t *testing.T) {
-	whenTwoTask := func(t1 int, t2 int) *Future {
-		timeout1 := time.Duration(t1)
-		timeout2 := time.Duration(t2)
-		task1 := func() (interface{}, error) {
-			if timeout1 > 0 {
-				time.Sleep(timeout1 * time.Millisecond)
-				return "ok", nil
-			} else {
-				time.Sleep((-1 * timeout1) * time.Millisecond)
-				return nil, newMyError("fail")
-			}
-		}
-		task2 := func() (interface{}, error) {
-			if timeout2 > 0 {
-				time.Sleep(timeout2 * time.Millisecond)
-				return "ok2", nil
-			} else {
-				time.Sleep((-1 * timeout2) * time.Millisecond)
-				return nil, newMyError("fail2")
-			}
-		}
-		f := WhenAny(Start(task1), Start(task2))
-		return f
-	}
-
-	r, err := whenTwoTask(200, 250).Get()
-	AreEqual(r, "ok", t)
-	AreEqual(err, nil, t)
-
-	r, err = whenTwoTask(280, 250).Get()
-	AreEqual(r, "ok2", t)
-	AreEqual(err, nil, t)
-
-	r, err = whenTwoTask(-280, -250).Get()
-	errs := err.(*AggregateError).InnerErrs
-	AreEqual(errs[0].(*myError).val, "fail", t)
-	AreEqual(errs[1].(*myError).val, "fail2", t)
-	AreEqual(r, nil, t)
-
-	r, err = whenTwoTask(-280, 150).Get()
-	AreEqual(r, "ok2", t)
-	AreEqual(err, nil, t)
-
-	r, err = WhenAny().Get()
-	AreEqual(r, nil, t)
-	AreEqual(err, nil, t)
-
-	var c1, c2 bool
-	startTwoCanCancelTask := func(t1 int, t2 int) *Future {
-		timeout1 := time.Duration(t1)
-		timeout2 := time.Duration(t2)
-		task1 := func(canceller Canceller) (r interface{}, err error) {
-			for i := 0; i < 10; i++ {
-				if timeout1 > 0 {
-					time.Sleep(timeout1 * time.Millisecond)
-				} else {
-					time.Sleep((-1 * timeout1) * time.Millisecond)
-				}
-				if canceller.IsCancellationRequested() {
-					t.Log("cancel 1")
-					canceller.SetCancelled()
-					c1 = true
-					return nil, nil
+	c.Convey("Test WhenAny", t, func() {
+		whenTwoTask := func(t1 int, t2 int) *Future {
+			timeouts := []time.Duration{time.Duration(t1), time.Duration(t2)}
+			getTask := func(i int) func() (interface{}, error) {
+				return func() (interface{}, error) {
+					if timeouts[i] > 0 {
+						time.Sleep(timeouts[i] * time.Millisecond)
+						return "ok" + strconv.Itoa(i), nil
+					} else {
+						time.Sleep((-1 * timeouts[i]) * time.Millisecond)
+						return nil, newMyError("fail" + strconv.Itoa(i))
+					}
 				}
 			}
-			if timeout1 > 0 {
-				return "ok", nil
-			} else {
-				return nil, newMyError("fail")
-			}
+			task0 := getTask(0)
+			task1 := getTask(1)
+			f := WhenAny(Start(task0), Start(task1))
+			return f
 		}
-		task2 := func(canceller Canceller) (r interface{}, err error) {
-			for i := 0; i < 10; i++ {
-				if timeout2 > 0 {
-					time.Sleep(timeout2 * time.Millisecond)
-				} else {
-					time.Sleep((-1 * timeout2) * time.Millisecond)
-				}
-				if canceller.IsCancellationRequested() {
-					t.Log("cancel 2")
-					canceller.SetCancelled()
-					c2 = true
-					return nil, nil
-				}
-			}
-			if timeout2 > 0 {
-				return "ok2", nil
-			} else {
-				return nil, newMyError("fail2")
-			}
-		}
-		f := WhenAny(Start(task1), Start(task2))
-		return f
-	}
-	r, err = startTwoCanCancelTask(10, 250).Get()
-	AreEqual(r, "ok", t)
-	AreEqual(err, nil, t)
-	time.Sleep(1000 * time.Millisecond)
-	AreEqual(c2, true, t)
 
-	//r, ok = startTwoCanCancelTask(280, 15).Get()
-	//AreEqual(r, []interface{}{20, "ok2"}, t)
-	//AreEqual(ok, RESULT_SUCCESS, t)
-	//AreEqual(c1, true, t)
+		c.Convey("When all tasks be successed, and task 1 returned firstly", func() {
+			r, err := whenTwoTask(200, 250).Get()
+			AreEqual(r, "ok0", t)
+			AreEqual(err, nil, t)
+		})
+
+		c.Convey("When all tasks be successed, and task 2 returned firstly", func() {
+			r, err := whenTwoTask(280, 250).Get()
+			AreEqual(r, "ok1", t)
+			AreEqual(err, nil, t)
+		})
+
+		c.Convey("When all tasks are failed", func() {
+			r, err := whenTwoTask(-280, -250).Get()
+			errs := err.(*AggregateError).InnerErrs
+			AreEqual(errs[0].(*myError).val, "fail0", t)
+			AreEqual(errs[1].(*myError).val, "fail1", t)
+			AreEqual(r, nil, t)
+		})
+
+		c.Convey("When one task is successed", func() {
+			r, err := whenTwoTask(-280, 150).Get()
+			AreEqual(r, "ok1", t)
+			AreEqual(err, nil, t)
+		})
+
+		c.Convey("When no task be passed", func() {
+			r, err := WhenAny().Get()
+			AreEqual(r, nil, t)
+			AreEqual(err, nil, t)
+		})
+	})
+
+	c.Convey("Test WhenAny with task can be cancelled", t, func() {
+		var c1, c2 bool
+		startTwoCanCancelTask := func(t1 int, t2 int) *Future {
+			timeouts := []time.Duration{time.Duration(t1), time.Duration(t2)}
+			getTask := func(i int) func(canceller Canceller) (interface{}, error) {
+				return func(canceller Canceller) (interface{}, error) {
+					for j := 0; j < 10; j++ {
+						if timeouts[i] > 0 {
+							time.Sleep(timeouts[i] * time.Millisecond)
+						} else {
+							time.Sleep((-1 * timeouts[i]) * time.Millisecond)
+						}
+						if canceller.IsCancellationRequested() {
+							canceller.SetCancelled()
+							if i == 0 {
+								c1 = true
+							} else {
+								c2 = true
+							}
+							return nil, nil
+						}
+					}
+					if timeouts[i] > 0 {
+						return "ok" + strconv.Itoa(i), nil
+					} else {
+						return nil, newMyError("fail" + strconv.Itoa(i))
+					}
+				}
+			}
+			task0 := getTask(0)
+			task1 := getTask(1)
+			f := WhenAny(Start(task0), Start(task1))
+			return f
+		}
+		c.Convey("When task 1 is the first to be successed, task 2 will be cancelled", func() {
+			r, err := startTwoCanCancelTask(10, 250).Get()
+
+			AreEqual(r, "ok0", t)
+			AreEqual(err, nil, t)
+			time.Sleep(1000 * time.Millisecond)
+			AreEqual(c2, true, t)
+		})
+
+		c.Convey("When task 2 is the first to be successed, task 1 will be cancelled", func() {
+			r, err := startTwoCanCancelTask(200, 10).Get()
+
+			AreEqual(r, "ok1", t)
+			AreEqual(err, nil, t)
+			time.Sleep(1000 * time.Millisecond)
+			AreEqual(c1, true, t)
+		})
+	})
 }
 
 func TestWhenAnyTrue(t *testing.T) {
