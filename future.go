@@ -308,6 +308,7 @@ func (this *Promise) end(r *PromiseResult) (e error) { //r *PromiseResult) {
 	defer func() {
 		if err := getError(recover()); err != nil {
 			e = err
+			fmt.Println("\nerror in end():", err)
 		}
 	}()
 	e = errors.New("Cannot resolve/reject/cancel more than once")
@@ -322,7 +323,6 @@ func (this *Promise) end(r *PromiseResult) (e error) { //r *PromiseResult) {
 		//fmt.Println("close done", r)
 
 		if r.Typ != RESULT_CANCELLED {
-			//fmt.Println("begin callback ", r)
 			//任务完成后调用回调函数
 			execCallback(r, this.dones, this.fails, this.always)
 
@@ -403,7 +403,7 @@ func (this *Future) handleOneCallback(callback func(v interface{}), t callbackTy
 	finalAction := func(r *PromiseResult) {
 		if (t == CALLBACK_DONE && r.Typ == RESULT_SUCCESS) ||
 			(t == CALLBACK_FAIL && r.Typ == RESULT_FAILURE) ||
-			(t == CALLBACK_ALWAYS) {
+			(t == CALLBACK_ALWAYS && r.Typ != RESULT_CANCELLED) {
 			callback(r.Result)
 		}
 	}
