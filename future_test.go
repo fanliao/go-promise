@@ -498,34 +498,34 @@ func TestWhenAny(t *testing.T) {
 
 		c.Convey("When all tasks be successed, and task 1 returned firstly", func() {
 			r, err := whenTwoTask(200, 250).Get()
-			AreEqual(r, "ok0", t)
-			AreEqual(err, nil, t)
+			c.So(r, c.ShouldEqual, "ok0")
+			c.So(err, c.ShouldBeNil)
 		})
 
 		c.Convey("When all tasks be successed, and task 2 returned firstly", func() {
 			r, err := whenTwoTask(280, 250).Get()
-			AreEqual(r, "ok1", t)
-			AreEqual(err, nil, t)
+			c.So(r, c.ShouldEqual, "ok1")
+			c.So(err, c.ShouldBeNil)
 		})
 
 		c.Convey("When all tasks are failed", func() {
 			r, err := whenTwoTask(-280, -250).Get()
 			errs := err.(*AggregateError).InnerErrs
-			AreEqual(errs[0].(*myError).val, "fail0", t)
-			AreEqual(errs[1].(*myError).val, "fail1", t)
-			AreEqual(r, nil, t)
+			c.So(r, c.ShouldBeNil)
+			c.So(errs[0].(*myError).val, c.ShouldEqual, "fail0")
+			c.So(errs[1].(*myError).val, c.ShouldEqual, "fail1")
 		})
 
 		c.Convey("When one task is successed", func() {
 			r, err := whenTwoTask(-280, 150).Get()
-			AreEqual(r, "ok1", t)
-			AreEqual(err, nil, t)
+			c.So(r, c.ShouldEqual, "ok1")
+			c.So(err, c.ShouldBeNil)
 		})
 
 		c.Convey("When no task be passed", func() {
 			r, err := WhenAny().Get()
-			AreEqual(r, nil, t)
-			AreEqual(err, nil, t)
+			c.So(r, c.ShouldBeNil)
+			c.So(err, c.ShouldBeNil)
 		})
 	})
 
@@ -566,19 +566,19 @@ func TestWhenAny(t *testing.T) {
 		c.Convey("When task 1 is the first to be successed, task 2 will be cancelled", func() {
 			r, err := startTwoCanCancelTask(10, 250).Get()
 
-			AreEqual(r, "ok0", t)
-			AreEqual(err, nil, t)
+			c.So(r, c.ShouldEqual, "ok0")
+			c.So(err, c.ShouldBeNil)
 			time.Sleep(1000 * time.Millisecond)
-			AreEqual(c2, true, t)
+			c.So(c2, c.ShouldEqual, true)
 		})
 
 		c.Convey("When task 2 is the first to be successed, task 1 will be cancelled", func() {
 			r, err := startTwoCanCancelTask(200, 10).Get()
 
-			AreEqual(r, "ok1", t)
-			AreEqual(err, nil, t)
+			c.So(r, c.ShouldEqual, "ok1")
+			c.So(err, c.ShouldBeNil)
 			time.Sleep(1000 * time.Millisecond)
-			AreEqual(c1, true, t)
+			c.So(c1, c.ShouldEqual, true)
 		})
 	})
 }
@@ -586,82 +586,72 @@ func TestWhenAny(t *testing.T) {
 func TestWhenAnyTrue(t *testing.T) {
 	c1, c2 := false, false
 	startTwoCanCancelTask := func(t1 int, t2 int, predicate func(interface{}) bool) *Future {
-		timeout1 := time.Duration(t1)
-		timeout2 := time.Duration(t2)
-		task1 := func(canceller Canceller) (r interface{}, err error) {
-			for i := 0; i < 10; i++ {
-				if timeout1 > 0 {
-					time.Sleep(timeout1 * time.Millisecond)
+		timeouts := []time.Duration{time.Duration(t1), time.Duration(t2)}
+		getTask := func(i int) func(canceller Canceller) (interface{}, error) {
+			return func(canceller Canceller) (interface{}, error) {
+				for j := 0; j < 10; j++ {
+					if timeouts[i] > 0 {
+						time.Sleep(timeouts[i] * time.Millisecond)
+					} else {
+						time.Sleep((-1 * timeouts[i]) * time.Millisecond)
+					}
+					if canceller.IsCancellationRequested() {
+						canceller.SetCancelled()
+						if i == 0 {
+							c1 = true
+						} else {
+							c2 = true
+						}
+						return nil, nil
+					}
+				}
+				if timeouts[i] > 0 {
+					return "ok" + strconv.Itoa(i), nil
 				} else {
-					time.Sleep((-1 * timeout1) * time.Millisecond)
+					return nil, newMyError("fail" + strconv.Itoa(i))
 				}
-				if canceller.IsCancellationRequested() {
-					t.Log("cancel 1")
-					canceller.SetCancelled()
-					c1 = true
-					return nil, nil
-				}
-			}
-			if timeout1 > 0 {
-				return 10, nil
-			} else {
-				return nil, newMyError(-10)
 			}
 		}
-		task2 := func(canceller Canceller) (r interface{}, err error) {
-			for i := 0; i < 10; i++ {
-				if timeout2 > 0 {
-					time.Sleep(timeout2 * time.Millisecond)
-				} else {
-					time.Sleep((-1 * timeout2) * time.Millisecond)
-				}
-				if canceller.IsCancellationRequested() {
-					t.Log("cancel 2")
-					canceller.SetCancelled()
-					c2 = true
-					return nil, nil
-				}
-			}
-			if timeout2 > 0 {
-				return 20, nil
-			} else {
-				return nil, newMyError(-20)
-			}
-		}
-		f := WhenAnyTrue(predicate, Start(task1), Start(task2))
+		task0 := getTask(0)
+		task1 := getTask(1)
+		f := WhenAnyTrue(predicate, Start(task0), Start(task1))
 		return f
 	}
 	//第一个任务先完成，第二个后完成，并且设定条件为返回值==第一个的返回值
-	r, err := startTwoCanCancelTask(30, 250, func(v interface{}) bool { return v.(int) == 10 }).Get()
-	AreEqual(r, 10, t)
-	AreEqual(err, nil, t)
-
-	time.Sleep(1000 * time.Millisecond)
-	AreEqual(c2, true, t)
+	c.Convey("", t, func() {
+		r, err := startTwoCanCancelTask(30, 250, func(v interface{}) bool {
+			return v.(string) == "ok0"
+		}).Get()
+		c.So(r, c.ShouldEqual, "ok0")
+		c.So(err, c.ShouldBeNil)
+		time.Sleep(1000 * time.Millisecond)
+		c.So(c2, c.ShouldEqual, true)
+	})
 
 	//第一个任务后完成，第二个先完成，并且设定条件为返回值==第二个的返回值
-	c1, c2 = false, false
-	r, err = startTwoCanCancelTask(250, 30, func(v interface{}) bool { return v.(int) == 20 }).Get()
-	AreEqual(r, 20, t)
-	AreEqual(err, nil, t)
-
-	time.Sleep(1000 * time.Millisecond)
-	AreEqual(c1, true, t)
+	c.Convey("", t, func() {
+		c1, c2 = false, false
+		r, err := startTwoCanCancelTask(230, 50, func(v interface{}) bool {
+			return v.(string) == "ok1"
+		}).Get()
+		c.So(r, c.ShouldEqual, "ok1")
+		c.So(err, c.ShouldBeNil)
+		time.Sleep(1000 * time.Millisecond)
+		c.So(c1, c.ShouldEqual, true)
+	})
 
 	//第一个任务后完成，第二个先完成，并且设定条件为返回值不等于任意一个任务的返回值
-	c1, c2 = false, false
-	r, err = startTwoCanCancelTask(10, 250, func(v interface{}) bool { return v.(int) == 200 }).Get()
-	AreEqual(r, false, t)
-	AreEqual(err, nil, t)
-
-	time.Sleep(1000 * time.Millisecond)
-	AreEqual(c1, false, t)
-	AreEqual(c2, false, t)
-
-	//r, ok = startTwoCanCancelTask(280, 15).Get()
-	//AreEqual(r, []interface{}{20, "ok2"}, t)
-	//AreEqual(ok, RESULT_SUCCESS, t)
-	//AreEqual(c1, true, t)
+	c.Convey("", t, func() {
+		c1, c2 = false, false
+		r, err := startTwoCanCancelTask(30, 250, func(v interface{}) bool {
+			return v.(string) == "ok11"
+		}).Get()
+		c.So(r, c.ShouldEqual, false)
+		c.So(err, c.ShouldBeNil)
+		time.Sleep(1000 * time.Millisecond)
+		c.So(c1, c.ShouldEqual, false)
+		c.So(c2, c.ShouldEqual, false)
+	})
 }
 
 func TestWhenAll(t *testing.T) {
