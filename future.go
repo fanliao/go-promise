@@ -255,23 +255,6 @@ func (this *Future) Pipe(callbacks ...(func(v interface{}) *Future)) (result *Fu
 				result = this.pipePromise.Future
 			})
 		}
-		//execWithLock(this.lock, func() {
-		//	if this.r != nil {
-		//		result = this
-		//		if this.r.Typ == RESULT_SUCCESS && callbacks[0] != nil {
-		//			result = (callbacks[0](this.r.Result))
-		//		} else if this.r.Typ != RESULT_FAILURE && len(callbacks) > 1 && callbacks[1] != nil {
-		//			result = (callbacks[1](this.r.Result))
-		//		}
-		//	} else {
-		//		this.pipeDoneTask = callbacks[0]
-		//		if len(callbacks) > 1 {
-		//			this.pipeFailTask = callbacks[1]
-		//		}
-		//		this.pipePromise = NewPromise()
-		//		result = this.pipePromise.Future
-		//	}
-		//})
 		ok = true
 	})
 	return

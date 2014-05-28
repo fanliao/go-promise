@@ -357,56 +357,56 @@ func TestCallbacks(t *testing.T) {
 
 func TestPipeWhenDone(t *testing.T) {
 	tObj = t
+	timout := 50 * time.Millisecond
 	taskDonePipe := func(v interface{}) *Future {
 		return Start(func() (interface{}, error) {
-			time.Sleep(100 * time.Millisecond)
-			order = append(order, DONE_Pipe_END)
+			<-time.After(timout)
 			return v.(string) + "2", nil
 		})
 	}
 
 	taskFailPipe := func(v interface{}) *Future {
 		return Start(func() (interface{}, error) {
-			val := v.(*myError).val.(string)
-			time.Sleep(100 * time.Millisecond)
-			order = append(order, FAIL_Pipe_END)
-			return nil, newMyError(val + "2")
+			<-time.After(timout)
+			return "fail2", nil
 		})
 	}
 
-	SubmitWithCallback := func(task func() (interface{}, error)) (*Future, bool) {
-		return Start(task).Done(done).Fail(fail).
-			Pipe(taskDonePipe, taskFailPipe)
-	}
+	c.Convey("test Done branch for Pipe function", t, func() {
+		p := NewPromise()
+		go func() {
+			<-time.After(timout)
+			p.Resolve("ok")
+		}()
+		fu, ok := p.Pipe(taskDonePipe, taskFailPipe)
+		r, err := fu.Get()
 
-	//test Done branch for Pipe function
-	order = make([]string, 0, 10)
-	f, isOk := SubmitWithCallback(taskDone)
-	r, err := f.Get()
-	order = append(order, GET)
-	time.Sleep(300 * time.Millisecond)
+		c.So(r, c.ShouldEqual, "ok2")
+		c.So(err, c.ShouldBeNil)
+		c.So(ok, c.ShouldEqual, true)
+	})
 
-	AreEqual(order, []string{TASK_END, CALL_DONE, DONE_Pipe_END, GET}, t)
-	AreEqual(r, "ok2", t)
-	AreEqual(err, nil, t)
-	AreEqual(isOk, true, t)
+	c.Convey("test Fail branch for Pipe function", t, func() {
+		p := NewPromise()
+		go func() {
+			<-time.After(timout)
+			p.Reject(errors.New("fail"))
+		}()
+		fu, ok := p.Pipe(taskDonePipe, taskFailPipe)
+		r, err := fu.Get()
 
-	//test fail branch for Pipe function
-	order = make([]string, 0, 10)
-	f, isOk = SubmitWithCallback(taskFail)
-	r, err = f.Get()
-	order = append(order, GET)
-	time.Sleep(300 * time.Millisecond)
+		c.So(r, c.ShouldEqual, "fail2")
+		c.So(err, c.ShouldBeNil)
+		c.So(ok, c.ShouldEqual, true)
+	})
 
-	AreEqual(order, []string{TASK_END, CALL_FAIL, FAIL_Pipe_END, GET}, t)
-	AreEqual(err.(*myError).val, "fail2", t)
-	AreEqual(r, nil, t)
-	AreEqual(isOk, true, t)
-
-	f, isOk = f.Pipe(taskDonePipe, taskFailPipe)
-	//t.Log("isok?", isOk, f, f.oncePipe)
-	AreEqual(isOk, true, t)
-	_, _ = f.Get()
+	c.Convey("test pipe two", t, func() {
+		p := NewPromise()
+		_, ok := p.Pipe(taskDonePipe, taskFailPipe)
+		c.So(ok, c.ShouldEqual, true)
+		_, ok = p.Pipe(taskDonePipe, taskFailPipe)
+		c.So(ok, c.ShouldEqual, false)
+	})
 }
 
 func TestGetOrTimeout(t *testing.T) {
