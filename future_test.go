@@ -69,50 +69,6 @@ func TestCancel1(t *testing.T) {
 		c.So(r, c.ShouldBeNil)
 		c.So(err, c.ShouldHaveSameTypeAs, &CancelledError{})
 	})
-	i := 0
-	task := func(canceller Canceller) (interface{}, error) {
-		for i < 50 {
-			if canceller.IsCancellationRequested() {
-				canceller.SetCancelled()
-				return nil, nil
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
-		panic("exception")
-	}
-
-	f := Start(task)
-	f.RequestCancel()
-	r, err := f.Get()
-	AreEqual(f.IsCancelled(), true, t)
-	AreEqual(r, nil, t)
-	AreEqual(err.Error(), (&CancelledError{}).Error(), t)
-
-	task = func(canceller Canceller) (interface{}, error) {
-		time.Sleep(100 * time.Millisecond)
-		return 1, nil
-	}
-	f = Start(task)
-	c := f.RequestCancel()
-	AreEqual(c, true, t)
-	r, err = f.Get()
-	AreEqual(r, 1, t)
-	AreEqual(err, nil, t)
-
-	AreEqual(f.IsCancelled(), false, t)
-
-	task1 := func() (interface{}, error) {
-		time.Sleep(100 * time.Millisecond)
-		return 1, nil
-	}
-	f = Start(task1)
-	c = f.RequestCancel()
-	AreEqual(c, false, t)
-	r, err = f.Get()
-	AreEqual(r, 1, t)
-	AreEqual(err, nil, t)
-
-	AreEqual(f.IsCancelled(), false, t)
 }
 
 func TestGetOrTimeout(t *testing.T) {
@@ -404,6 +360,7 @@ func TestCallbacks(t *testing.T) {
 }
 
 func TestStart(t *testing.T) {
+
 	c.Convey("Test start func()", t, func() {
 	})
 
@@ -414,6 +371,57 @@ func TestStart(t *testing.T) {
 	})
 
 	c.Convey("Test start func(canceller Canceller)(interface{}, error)", t, func() {
+		c.Convey("When task be cancenlled", func() {
+			task := func(canceller Canceller) (interface{}, error) {
+				i := 0
+				for i < 50 {
+					if canceller.IsCancellationRequested() {
+						canceller.SetCancelled()
+						return nil, nil
+					}
+					time.Sleep(100 * time.Millisecond)
+				}
+				panic("exception")
+			}
+
+			f := Start(task)
+			f.RequestCancel()
+			r, err := f.Get()
+
+			c.So(f.IsCancelled(), c.ShouldBeTrue)
+			c.So(r, c.ShouldBeNil)
+			c.So(err, c.ShouldHaveSameTypeAs, &CancelledError{})
+		})
+
+		c.Convey("When didn't call SetCancel()", func() {
+			task := func(canceller Canceller) (interface{}, error) {
+				time.Sleep(100 * time.Millisecond)
+				return 1, nil
+			}
+			f := Start(task)
+			cancel := f.RequestCancel()
+			c.So(cancel, c.ShouldBeTrue)
+
+			r, err := f.Get()
+			c.So(f.IsCancelled(), c.ShouldBeFalse)
+			c.So(err, c.ShouldBeNil)
+			c.So(r, c.ShouldEqual, 1)
+		})
+
+		c.Convey("When request cancelling a task without Canceller argument", func() {
+			task1 := func() (interface{}, error) {
+				time.Sleep(100 * time.Millisecond)
+				return 1, nil
+			}
+			f := Start(task1)
+			cancel := f.RequestCancel()
+			c.So(cancel, c.ShouldBeFalse)
+			r, err := f.Get()
+			c.So(f.IsCancelled(), c.ShouldBeFalse)
+			c.So(err, c.ShouldBeNil)
+			c.So(r, c.ShouldEqual, 1)
+		})
+
 	})
 }
 
