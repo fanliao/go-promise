@@ -41,9 +41,11 @@ func TestResolveAndReject(t *testing.T) {
 			time.Sleep(50 * time.Millisecond)
 			p.Resolve("ok")
 		}()
-		r, err := p.Get()
-		c.So(r, c.ShouldEqual, "ok")
-		c.So(err, c.ShouldBeNil)
+		c.Convey("Should return the argument of Resolve", func() {
+			r, err := p.Get()
+			c.So(r, c.ShouldEqual, "ok")
+			c.So(err, c.ShouldBeNil)
+		})
 	})
 
 	c.Convey("When Promise is rejected", t, func() {
@@ -52,22 +54,26 @@ func TestResolveAndReject(t *testing.T) {
 			time.Sleep(50 * time.Millisecond)
 			p.Reject(errors.New("fail"))
 		}()
-		r, err := p.Get()
-		c.So(err, c.ShouldNotBeNil)
-		c.So(r, c.ShouldEqual, nil)
+		c.Convey("Should return error", func() {
+			r, err := p.Get()
+			c.So(err, c.ShouldNotBeNil)
+			c.So(r, c.ShouldEqual, nil)
+		})
 	})
 }
 
-func TestCancel1(t *testing.T) {
+func TestCancel(t *testing.T) {
 	c.Convey("When Promise is cancelled", t, func() {
 		p := NewPromise()
 		go func() {
 			time.Sleep(50 * time.Millisecond)
 			p.Cancel()
 		}()
-		r, err := p.Get()
-		c.So(r, c.ShouldBeNil)
-		c.So(err, c.ShouldHaveSameTypeAs, &CancelledError{})
+		c.Convey("Should return CancelledError", func() {
+			r, err := p.Get()
+			c.So(r, c.ShouldBeNil)
+			c.So(err, c.ShouldHaveSameTypeAs, &CancelledError{})
+		})
 	})
 }
 
@@ -79,14 +85,16 @@ func TestGetOrTimeout(t *testing.T) {
 			<-time.After(timout)
 			p.Resolve("ok")
 		}()
-		r, err, timeout := p.GetOrTimeout(10)
-		c.So(timeout, c.ShouldEqual, true)
-		c.So(r, c.ShouldBeNil)
-		c.So(err, c.ShouldBeNil)
+		c.Convey("timeout should be true", func() {
+			r, err, timeout := p.GetOrTimeout(10)
+			c.So(timeout, c.ShouldBeTrue)
+			c.So(r, c.ShouldBeNil)
+			c.So(err, c.ShouldBeNil)
+		})
 
-		c.Convey("When Promise is resolved", func() {
+		c.Convey("When Promise is resolved, the argument of Resolve should be returned", func() {
 			r, err, timeout := p.GetOrTimeout(50)
-			c.So(timeout, c.ShouldEqual, false)
+			c.So(timeout, c.ShouldBeFalse)
 			c.So(r, c.ShouldEqual, "ok")
 			c.So(err, c.ShouldBeNil)
 		})
@@ -98,10 +106,12 @@ func TestGetOrTimeout(t *testing.T) {
 			<-time.After(timout)
 			p.Reject(errors.New("fail"))
 		}()
-		r, err, timeout := p.GetOrTimeout(53)
-		c.So(timeout, c.ShouldEqual, false)
-		c.So(r, c.ShouldBeNil)
-		c.So(err, c.ShouldNotBeNil)
+		c.Convey("Should return error", func() {
+			r, err, timeout := p.GetOrTimeout(53)
+			c.So(timeout, c.ShouldBeFalse)
+			c.So(r, c.ShouldBeNil)
+			c.So(err, c.ShouldNotBeNil)
+		})
 	})
 
 	c.Convey("When Promise is cancelled", t, func() {
@@ -110,10 +120,12 @@ func TestGetOrTimeout(t *testing.T) {
 			<-time.After(timout)
 			p.Cancel()
 		}()
-		r, err, timeout := p.GetOrTimeout(53)
-		c.So(timeout, c.ShouldEqual, false)
-		c.So(r, c.ShouldBeNil)
-		c.So(err, c.ShouldHaveSameTypeAs, &CancelledError{})
+		c.Convey("Should return CancelledError", func() {
+			r, err, timeout := p.GetOrTimeout(53)
+			c.So(timeout, c.ShouldBeFalse)
+			c.So(r, c.ShouldBeNil)
+			c.So(err, c.ShouldHaveSameTypeAs, &CancelledError{})
+		})
 	})
 }
 
@@ -125,10 +137,12 @@ func TestGetChan(t *testing.T) {
 			<-time.After(timout)
 			p.Resolve("ok")
 		}()
-		fr, ok := <-p.GetChan()
-		c.So(fr.Result, c.ShouldEqual, "ok")
-		c.So(fr.Typ, c.ShouldEqual, RESULT_SUCCESS)
-		c.So(ok, c.ShouldBeTrue)
+		c.Convey("Should receive the argument of Resolve from returned channel", func() {
+			fr, ok := <-p.GetChan()
+			c.So(fr.Result, c.ShouldEqual, "ok")
+			c.So(fr.Typ, c.ShouldEqual, RESULT_SUCCESS)
+			c.So(ok, c.ShouldBeTrue)
+		})
 	})
 
 	c.Convey("When Promise is rejected", t, func() {
@@ -137,10 +151,12 @@ func TestGetChan(t *testing.T) {
 			<-time.After(timout)
 			p.Reject(errors.New("fail"))
 		}()
-		fr, ok := <-p.GetChan()
-		c.So(fr.Result, c.ShouldNotBeNil)
-		c.So(fr.Typ, c.ShouldEqual, RESULT_FAILURE)
-		c.So(ok, c.ShouldBeTrue)
+		c.Convey("Should receive error from returned channel", func() {
+			fr, ok := <-p.GetChan()
+			c.So(fr.Result, c.ShouldNotBeNil)
+			c.So(fr.Typ, c.ShouldEqual, RESULT_FAILURE)
+			c.So(ok, c.ShouldBeTrue)
+		})
 	})
 
 	c.Convey("When Promise is cancelled", t, func() {
@@ -149,55 +165,59 @@ func TestGetChan(t *testing.T) {
 			<-time.After(timout)
 			p.Cancel()
 		}()
-		fr, ok := <-p.GetChan()
-		c.So(fr.Result, c.ShouldBeNil)
-		c.So(fr.Typ, c.ShouldEqual, RESULT_CANCELLED)
-		c.So(ok, c.ShouldBeTrue)
+		c.Convey("Should receive CancelledError from returned channel", func() {
+			fr, ok := <-p.GetChan()
+			c.So(fr.Result, c.ShouldHaveSameTypeAs, &CancelledError{})
+			c.So(fr.Typ, c.ShouldEqual, RESULT_CANCELLED)
+			c.So(ok, c.ShouldBeTrue)
+		})
 	})
 }
 
 func TestFuture(t *testing.T) {
-	var fu *Future
-	c.Convey("When Future is resolved", t, func() {
-		func() {
-			p := NewPromise()
-			go func() {
-				time.Sleep(50 * time.Millisecond)
-				p.Resolve("ok")
+	c.Convey("Future can receive return value and status but cannot change the status", t, func() {
+		var fu *Future
+		c.Convey("When Future is resolved", func() {
+			func() {
+				p := NewPromise()
+				go func() {
+					time.Sleep(50 * time.Millisecond)
+					p.Resolve("ok")
+				}()
+				fu = p.Future
 			}()
-			fu = p.Future
-		}()
-		r, err := fu.Get()
-		c.So(r, c.ShouldEqual, "ok")
-		c.So(err, c.ShouldBeNil)
-	})
+			r, err := fu.Get()
+			c.So(r, c.ShouldEqual, "ok")
+			c.So(err, c.ShouldBeNil)
+		})
 
-	c.Convey("When Future is rejected", t, func() {
-		func() {
-			p := NewPromise()
-			go func() {
-				time.Sleep(50 * time.Millisecond)
-				p.Reject(errors.New("fail"))
+		c.Convey("When Future is rejected", func() {
+			func() {
+				p := NewPromise()
+				go func() {
+					time.Sleep(50 * time.Millisecond)
+					p.Reject(errors.New("fail"))
+				}()
+				fu = p.Future
 			}()
-			fu = p.Future
-		}()
-		r, err := fu.Get()
-		c.So(err, c.ShouldNotBeNil)
-		c.So(r, c.ShouldEqual, nil)
-	})
+			r, err := fu.Get()
+			c.So(err, c.ShouldNotBeNil)
+			c.So(r, c.ShouldEqual, nil)
+		})
 
-	c.Convey("When Future is cancelled", t, func() {
-		func() {
-			p := NewPromise()
-			go func() {
-				time.Sleep(50 * time.Millisecond)
-				p.Cancel()
+		c.Convey("When Future is cancelled", func() {
+			func() {
+				p := NewPromise()
+				go func() {
+					time.Sleep(50 * time.Millisecond)
+					p.Cancel()
+				}()
+				fu = p.Future
 			}()
-			fu = p.Future
-		}()
-		r, err := fu.Get()
-		c.So(err, c.ShouldNotBeNil)
-		c.So(r, c.ShouldEqual, nil)
+			r, err := fu.Get()
+			c.So(err, c.ShouldNotBeNil)
+			c.So(r, c.ShouldEqual, nil)
+		})
 	})
 
 }
@@ -233,11 +253,13 @@ func TestCallbacks(t *testing.T) {
 		//So sleep 52 ms to wait all callback be done
 		time.Sleep(52 * time.Millisecond)
 
-		c.So(r, c.ShouldEqual, "ok")
-		c.So(err, c.ShouldBeNil)
-		c.So(done, c.ShouldEqual, true)
-		c.So(always, c.ShouldEqual, true)
-		c.So(fail, c.ShouldEqual, false)
+		c.Convey("Should call the Done and Always callbacks", func() {
+			c.So(r, c.ShouldEqual, "ok")
+			c.So(err, c.ShouldBeNil)
+			c.So(done, c.ShouldEqual, true)
+			c.So(always, c.ShouldEqual, true)
+			c.So(fail, c.ShouldEqual, false)
+		})
 	})
 
 	c.Convey("When adding the callback after Promise is resolved", t, func() {
@@ -256,9 +278,11 @@ func TestCallbacks(t *testing.T) {
 			fail = true
 			panic("Unexpected calling")
 		})
-		c.So(done, c.ShouldEqual, true)
-		c.So(always, c.ShouldEqual, true)
-		c.So(fail, c.ShouldEqual, false)
+		c.Convey("Should immediately run the Done and Always callbacks", func() {
+			c.So(done, c.ShouldEqual, true)
+			c.So(always, c.ShouldEqual, true)
+			c.So(fail, c.ShouldEqual, false)
+		})
 	})
 
 	var e *error = nil
@@ -288,11 +312,13 @@ func TestCallbacks(t *testing.T) {
 
 		time.Sleep(52 * time.Millisecond)
 
-		c.So(r, c.ShouldEqual, nil)
-		c.So(err, c.ShouldNotBeNil)
-		c.So(done, c.ShouldEqual, false)
-		c.So(always, c.ShouldEqual, true)
-		c.So(fail, c.ShouldEqual, true)
+		c.Convey("Should call the Fail and Always callbacks", func() {
+			c.So(r, c.ShouldEqual, nil)
+			c.So(err, c.ShouldNotBeNil)
+			c.So(done, c.ShouldEqual, false)
+			c.So(always, c.ShouldEqual, true)
+			c.So(fail, c.ShouldEqual, true)
+		})
 	})
 
 	c.Convey("When adding the callback after Promise is rejected", t, func() {
@@ -311,9 +337,11 @@ func TestCallbacks(t *testing.T) {
 				c.So(v, c.ShouldImplement, e)
 			})
 		})
-		c.So(done, c.ShouldEqual, false)
-		c.So(always, c.ShouldEqual, true)
-		c.So(fail, c.ShouldEqual, true)
+		c.Convey("Should immediately run the Fail and Always callbacks", func() {
+			c.So(done, c.ShouldEqual, false)
+			c.So(always, c.ShouldEqual, true)
+			c.So(fail, c.ShouldEqual, true)
+		})
 	})
 
 	done, always, fail = false, false, false
@@ -336,11 +364,13 @@ func TestCallbacks(t *testing.T) {
 
 		time.Sleep(52 * time.Millisecond)
 
-		c.So(r, c.ShouldBeNil)
-		c.So(err, c.ShouldNotBeNil)
-		c.So(done, c.ShouldEqual, false)
-		c.So(always, c.ShouldEqual, false)
-		c.So(fail, c.ShouldEqual, false)
+		c.Convey("Should not call any callbacks", func() {
+			c.So(r, c.ShouldBeNil)
+			c.So(err, c.ShouldNotBeNil)
+			c.So(done, c.ShouldEqual, false)
+			c.So(always, c.ShouldEqual, false)
+			c.So(fail, c.ShouldEqual, false)
+		})
 	})
 
 	c.Convey("When adding the callback after Promise is cancelled", t, func() {
@@ -352,9 +382,11 @@ func TestCallbacks(t *testing.T) {
 		}).Fail(func(v interface{}) {
 			fail = true
 		})
-		c.So(done, c.ShouldEqual, false)
-		c.So(always, c.ShouldEqual, false)
-		c.So(fail, c.ShouldEqual, false)
+		c.Convey("Should not call any callbacks", func() {
+			c.So(done, c.ShouldEqual, false)
+			c.So(always, c.ShouldEqual, false)
+			c.So(fail, c.ShouldEqual, false)
+		})
 	})
 
 }

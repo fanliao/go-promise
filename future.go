@@ -48,7 +48,7 @@ type Promise struct {
 
 //Cancel表示任务正常完成
 func (this *Promise) Cancel() (e error) {
-	return this.end(&PromiseResult{nil, RESULT_CANCELLED})
+	return this.end(&PromiseResult{&CancelledError{}, RESULT_CANCELLED})
 }
 
 //Reslove表示任务正常完成
@@ -198,7 +198,7 @@ func getFutureReturnVal(r *PromiseResult) (interface{}, error) {
 	} else if r.Typ == RESULT_FAILURE {
 		return nil, getError(r.Result)
 	} else {
-		return nil, &CancelledError{}
+		return nil, getError(r.Result) //&CancelledError{}
 	}
 }
 
