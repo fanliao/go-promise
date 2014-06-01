@@ -476,7 +476,7 @@ func getAct(pr *Promise, act interface{}) (f func() (r interface{}, err error)) 
 		canCancel = true
 		act2 = v
 	case func():
-		act = func() (interface{}, error) {
+		act1 = func() (interface{}, error) {
 			v()
 			return nil, nil
 		}

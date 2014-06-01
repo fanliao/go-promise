@@ -394,15 +394,107 @@ func TestCallbacks(t *testing.T) {
 func TestStart(t *testing.T) {
 
 	c.Convey("Test start func()", t, func() {
+		c.Convey("When task completed", func() {
+			f := Start(func() {})
+			r, err := f.Get()
+			c.So(r, c.ShouldBeNil)
+			c.So(err, c.ShouldBeNil)
+		})
+		c.Convey("When task panic error", func() {
+			f := Start(func() { panic("fail") })
+			r, err := f.Get()
+			c.So(r, c.ShouldBeNil)
+			c.So(err, c.ShouldNotBeNil)
+		})
 	})
 
 	c.Convey("Test start func()(interface{}, error)", t, func() {
+		c.Convey("When task completed", func() {
+			f := Start(func() (interface{}, error) {
+				time.Sleep(10)
+				return "ok", nil
+			})
+			r, err := f.Get()
+			c.So(r, c.ShouldEqual, "ok")
+			c.So(err, c.ShouldBeNil)
+		})
+
+		c.Convey("When task returned error", func() {
+			f := Start(func() (interface{}, error) {
+				time.Sleep(10)
+				return "fail", errors.New("fail")
+			})
+			r, err := f.Get()
+			c.So(r, c.ShouldBeNil)
+			c.So(err, c.ShouldNotBeNil)
+		})
+
+		c.Convey("When task panic error", func() {
+			f := Start(func() (interface{}, error) { panic("fail") })
+			r, err := f.Get()
+			c.So(r, c.ShouldBeNil)
+			c.So(err, c.ShouldNotBeNil)
+		})
 	})
 
 	c.Convey("Test start func(canceller Canceller)", t, func() {
+		c.Convey("When task completed", func() {
+			f := Start(func(canceller Canceller) {
+				time.Sleep(10)
+			})
+			r, err := f.Get()
+			c.So(r, c.ShouldBeNil)
+			c.So(err, c.ShouldBeNil)
+		})
+
+		c.Convey("When task be requested to cancel, but request be ignored", func() {
+			f := Start(func(canceller Canceller) {
+				time.Sleep(10)
+			})
+			f.RequestCancel()
+			r, err := f.Get()
+			c.So(f.IsCancelled(), c.ShouldBeFalse)
+			c.So(r, c.ShouldBeNil)
+			c.So(err, c.ShouldBeNil)
+		})
+
+		c.Convey("When task be cancelled", func() {
+			f := Start(func(canceller Canceller) {
+				time.Sleep(10)
+				if canceller.IsCancellationRequested() {
+					canceller.SetCancelled()
+				}
+			})
+			f.RequestCancel()
+			r, err := f.Get()
+			c.So(f.IsCancelled(), c.ShouldBeTrue)
+			c.So(r, c.ShouldBeNil)
+			c.So(err, c.ShouldHaveSameTypeAs, &CancelledError{})
+		})
+		c.Convey("When task panic error", func() {
+			f := Start(func(canceller Canceller) { panic("fail") })
+			r, err := f.Get()
+			c.So(r, c.ShouldBeNil)
+			c.So(err, c.ShouldNotBeNil)
+		})
 	})
 
 	c.Convey("Test start func(canceller Canceller)(interface{}, error)", t, func() {
+		c.Convey("When task be requested to cancel, but request be ignored", func() {
+			task := func(canceller Canceller) (interface{}, error) {
+				time.Sleep(100 * time.Millisecond)
+				return 1, nil
+			}
+			f := Start(task)
+			cancel := f.RequestCancel()
+			c.So(cancel, c.ShouldBeTrue)
+
+			r, err := f.Get()
+			c.So(f.IsCancelled(), c.ShouldBeFalse)
+			c.So(err, c.ShouldBeNil)
+			c.So(r, c.ShouldEqual, 1)
+		})
+
 		c.Convey("When task be cancenlled", func() {
 			task := func(canceller Canceller) (interface{}, error) {
 				i := 0
@@ -425,36 +517,16 @@ func TestStart(t *testing.T) {
 			c.So(err, c.ShouldHaveSameTypeAs, &CancelledError{})
 		})
 
-		c.Convey("When didn't call SetCancel()", func() {
-			task := func(canceller Canceller) (interface{}, error) {
-				time.Sleep(100 * time.Millisecond)
-				return 1, nil
-			}
-			f := Start(task)
-			cancel := f.RequestCancel()
-			c.So(cancel, c.ShouldBeTrue)
-
+		c.Convey("When task panic error", func() {
+			f := Start(func(canceller Canceller) (interface{}, error) {
+				panic("fail")
+			})
 			r, err := f.Get()
-			c.So(f.IsCancelled(), c.ShouldBeFalse)
-			c.So(err, c.ShouldBeNil)
-			c.So(r, c.ShouldEqual, 1)
+			c.So(r, c.ShouldBeNil)
+			c.So(err, c.ShouldNotBeNil)
 		})
-
-		c.Convey("When request cancelling a task without Canceller argument", func() {
-			task1 := func() (interface{}, error) {
-				time.Sleep(100 * time.Millisecond)
-				return 1, nil
-			}
-			f := Start(task1)
-			cancel := f.RequestCancel()
-			c.So(cancel, c.ShouldBeFalse)
-			r, err := f.Get()
-			c.So(f.IsCancelled(), c.ShouldBeFalse)
-			c.So(err, c.ShouldBeNil)
-			c.So(r, c.ShouldEqual, 1)
-		})
-
 	})
+
 }
 
 func TestPipeWhenDone(t *testing.T) {
@@ -473,7 +545,7 @@ func TestPipeWhenDone(t *testing.T) {
 		})
 	}
 
-	c.Convey("test Done branch for Pipe function", t, func() {
+	c.Convey("When task completed", t, func() {
 		p := NewPromise()
 		go func() {
 			<-time.After(timout)
@@ -481,13 +553,14 @@ func TestPipeWhenDone(t *testing.T) {
 		}()
 		fu, ok := p.Pipe(taskDonePipe, taskFailPipe)
 		r, err := fu.Get()
-
-		c.So(r, c.ShouldEqual, "ok2")
-		c.So(err, c.ShouldBeNil)
-		c.So(ok, c.ShouldEqual, true)
+		c.Convey("the done callback will be called, the future returned by done callback will be returned as chain future", func() {
+			c.So(r, c.ShouldEqual, "ok2")
+			c.So(err, c.ShouldBeNil)
+			c.So(ok, c.ShouldEqual, true)
+		})
 	})
 
-	c.Convey("test Fail branch for Pipe function", t, func() {
+	c.Convey("When task failed", t, func() {
 		p := NewPromise()
 		go func() {
 			<-time.After(timout)
@@ -496,23 +569,29 @@ func TestPipeWhenDone(t *testing.T) {
 		fu, ok := p.Pipe(taskDonePipe, taskFailPipe)
 		r, err := fu.Get()
 
-		c.So(r, c.ShouldEqual, "fail2")
-		c.So(err, c.ShouldBeNil)
-		c.So(ok, c.ShouldEqual, true)
+		c.Convey("the fail callback will be called, the future returned by fail callback will be returned as chain future", func() {
+			c.So(r, c.ShouldEqual, "fail2")
+			c.So(err, c.ShouldBeNil)
+			c.So(ok, c.ShouldEqual, true)
+		})
 	})
 
-	c.Convey("test pipe twice", t, func() {
+	c.Convey("Test pipe twice", t, func() {
 		p := NewPromise()
 		_, ok := p.Pipe(taskDonePipe, taskFailPipe)
-		c.So(ok, c.ShouldEqual, true)
+		c.Convey("Calling Pipe can succeed at first time", func(){
+			c.So(ok, c.ShouldEqual, true)
+		})
 		_, ok = p.Pipe(taskDonePipe, taskFailPipe)
-		c.So(ok, c.ShouldEqual, false)
+		c.Convey("Only can call Pipe once, calling Pipe always failed at second time", func(){
+			c.So(ok, c.ShouldEqual, false)
+		})
 	})
 }
 
 func TestWhenAny(t *testing.T) {
 	c.Convey("Test WhenAny", t, func() {
-		whenTwoTask := func(t1 int, t2 int) *Future {
+		whenAnyTasks := func(t1 int, t2 int) *Future {
 			timeouts := []time.Duration{time.Duration(t1), time.Duration(t2)}
 			getTask := func(i int) func() (interface{}, error) {
 				return func() (interface{}, error) {
@@ -532,19 +611,19 @@ func TestWhenAny(t *testing.T) {
 		}
 
 		c.Convey("When all tasks completed, and task 1 be first to complete", func() {
-			r, err := whenTwoTask(200, 250).Get()
+			r, err := whenAnyTasks(200, 250).Get()
 			c.So(r, c.ShouldEqual, "ok0")
 			c.So(err, c.ShouldBeNil)
 		})
 
 		c.Convey("When all tasks completed, and task 2 be first to complete", func() {
-			r, err := whenTwoTask(280, 250).Get()
+			r, err := whenAnyTasks(280, 250).Get()
 			c.So(r, c.ShouldEqual, "ok1")
 			c.So(err, c.ShouldBeNil)
 		})
 
 		c.Convey("When all tasks failed", func() {
-			r, err := whenTwoTask(-280, -250).Get()
+			r, err := whenAnyTasks(-280, -250).Get()
 			errs := err.(*AggregateError).InnerErrs
 			c.So(r, c.ShouldBeNil)
 			c.So(errs[0].(*myError).val, c.ShouldEqual, "fail0")
@@ -552,7 +631,7 @@ func TestWhenAny(t *testing.T) {
 		})
 
 		c.Convey("When one task completed", func() {
-			r, err := whenTwoTask(-280, 150).Get()
+			r, err := whenAnyTasks(-280, 150).Get()
 			c.So(r, c.ShouldEqual, "ok1")
 			c.So(err, c.ShouldBeNil)
 		})
@@ -566,7 +645,7 @@ func TestWhenAny(t *testing.T) {
 
 	c.Convey("Test WhenAny with task can be cancelled", t, func() {
 		var c1, c2 bool
-		startTwoCanCancelTask := func(t1 int, t2 int) *Future {
+		whenAnyCanCancelTasks := func(t1 int, t2 int) *Future {
 			timeouts := []time.Duration{time.Duration(t1), time.Duration(t2)}
 			getTask := func(i int) func(canceller Canceller) (interface{}, error) {
 				return func(canceller Canceller) (interface{}, error) {
@@ -599,7 +678,7 @@ func TestWhenAny(t *testing.T) {
 			return f
 		}
 		c.Convey("When task 1 is the first to complete, task 2 will be cancelled", func() {
-			r, err := startTwoCanCancelTask(10, 250).Get()
+			r, err := whenAnyCanCancelTasks(10, 250).Get()
 
 			c.So(r, c.ShouldEqual, "ok0")
 			c.So(err, c.ShouldBeNil)
@@ -608,7 +687,7 @@ func TestWhenAny(t *testing.T) {
 		})
 
 		c.Convey("When task 2 is the first to complete, task 1 will be cancelled", func() {
-			r, err := startTwoCanCancelTask(200, 10).Get()
+			r, err := whenAnyCanCancelTasks(200, 10).Get()
 
 			c.So(r, c.ShouldEqual, "ok1")
 			c.So(err, c.ShouldBeNil)
@@ -785,9 +864,11 @@ func TestWhenAll(t *testing.T) {
 }
 
 func TestWrap(t *testing.T) {
-	r, err := Wrap(10).Get()
-	AreEqual(r, 10, t)
-	AreEqual(err, nil, t)
+	c.Convey("Test Wrap a value", t, func() {
+		r, err := Wrap(10).Get()
+		c.So(r, c.ShouldEqual, 10)
+		c.So(err, c.ShouldBeNil)
+	})
 }
 
 func shouldSlicesReSame(actual interface{}, expected ...interface{}) string {
