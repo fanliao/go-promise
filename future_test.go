@@ -578,13 +578,13 @@ func TestPipeWhenDone(t *testing.T) {
 
 	c.Convey("Test pipe twice", t, func() {
 		p := NewPromise()
-		_, ok := p.Pipe(taskDonePipe, taskFailPipe)
-		c.Convey("Calling Pipe can succeed at first time", func(){
-			c.So(ok, c.ShouldEqual, true)
+		_, ok1 := p.Pipe(taskDonePipe, taskFailPipe)
+		c.Convey("Calling Pipe can succeed at first time", func() {
+			c.So(ok1, c.ShouldEqual, true)
 		})
-		_, ok = p.Pipe(taskDonePipe, taskFailPipe)
-		c.Convey("Only can call Pipe once, calling Pipe always failed at second time", func(){
-			c.So(ok, c.ShouldEqual, false)
+		_, ok2 := p.Pipe(taskDonePipe, taskFailPipe)
+		c.Convey("Only can call Pipe once, calling Pipe always failed at second time", func() {
+			c.So(ok2, c.ShouldEqual, false)
 		})
 	})
 }
@@ -643,7 +643,7 @@ func TestWhenAny(t *testing.T) {
 		})
 	})
 
-	c.Convey("Test WhenAny with task can be cancelled", t, func() {
+	c.Convey("Test WhenAny, and task can be cancelled", t, func() {
 		var c1, c2 bool
 		whenAnyCanCancelTasks := func(t1 int, t2 int) *Future {
 			timeouts := []time.Duration{time.Duration(t1), time.Duration(t2)}

@@ -1,3 +1,15 @@
+/*
+Package promise provides a complete promise and future implementation.
+A quick start sample:
+
+
+fu := Start(func()(resp interface{}, err error){
+    resp, err := http.Get("http://example.com/")
+    return
+})
+//do somthing...
+resp, err := fu.Get()
+*/
 package promise
 
 import (
@@ -233,6 +245,7 @@ func (this *Future) Pipe(callbacks ...(func(v interface{}) *Future)) (result *Fu
 		(len(callbacks) == 1 && callbacks[0] == nil) ||
 		(len(callbacks) > 1 && callbacks[0] == nil && callbacks[1] == nil) {
 		result = this
+		fmt.Println("return false")
 		return
 	}
 
@@ -256,6 +269,7 @@ func (this *Future) Pipe(callbacks ...(func(v interface{}) *Future)) (result *Fu
 			})
 		}
 		ok = true
+		fmt.Println("return true")
 	})
 	return
 }
