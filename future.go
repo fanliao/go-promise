@@ -41,39 +41,56 @@ const (
 )
 
 //代表异步任务的结果
+
+//PromiseResult presents the result of a promise
 type PromiseResult struct {
-	Result interface{}
-	Typ    resultType
+	Result interface{} //result of the Promise
+	Typ    resultType  //success, failure, or cancelled?
 }
 
 //处理链式调用
+
+//pipe presents the chain promise
 type pipe struct {
 	pipeDoneTask, pipeFailTask func(v interface{}) *Future
 	pipePromise                *Promise
 }
 
 //异步任务
+
+//Promise describe an object that acts as a proxy for a result
+//that is initially unknown, usually because the computation of its
+//value is yet incomplete (refer to wikipedia).
 type Promise struct {
 	onceEnd *sync.Once
 	*Future
 }
 
 //Cancel表示任务正常完成
+
+//Cancel method set the status of promise to cancelled
+//if promise is cancelled, Get() will return nil and CancelledError
 func (this *Promise) Cancel() (e error) {
 	return this.end(&PromiseResult{&CancelledError{}, RESULT_CANCELLED})
 }
 
 //Reslove表示任务正常完成
+
+//Resolve method set the value of promise, and the status will be changed to resolved
+//if promise is resolved, Get() will return the value
 func (this *Promise) Resolve(v interface{}) (e error) {
 	return this.end(&PromiseResult{v, RESULT_SUCCESS})
 }
 
 //Reject表示任务失败
+
+//Resolve method set the error value of promise, and the status will be changed to rejected
+//if promise is rejected, Get() will return the error value
 func (this *Promise) Reject(err error) (e error) {
 	return this.end(&PromiseResult{err, RESULT_FAILURE})
 }
 
-//Set a Promise can be cancelled
+//EnableCanceller set a Promise can be cancelled
 func (this *Promise) EnableCanceller() *Promise {
 	if this.canceller == nil {
 		this.canceller = &canceller{}
@@ -83,6 +100,9 @@ func (this *Promise) EnableCanceller() *Promise {
 
 //添加一个任务成功完成时的回调，如果任务已经成功完成，则直接执行回调函数
 //传递给Done函数的参数与Reslove函数的参数相同
+
+//Done register a callback function for resolved status
+//if promise is already resolved, the callback will immediately called.
 func (this *Promise) Done(callback func(v interface{})) *Promise {
 	this.Future.Done(callback)
 	return this
@@ -90,6 +110,9 @@ func (this *Promise) Done(callback func(v interface{})) *Promise {
 
 //添加一个任务失败时的回调，如果任务已经失败，则直接执行回调函数
 //传递给Fail函数的参数与Reject函数的参数相同
+
+//Fail register a callback function for rejected status
+//if promise is already rejected, the callback will immediately called.
 func (this *Promise) Fail(callback func(v interface{})) *Promise {
 	this.Future.Fail(callback)
 	return this
@@ -97,18 +120,25 @@ func (this *Promise) Fail(callback func(v interface{})) *Promise {
 
 //添加一个回调函数，该函数将在任务完成后执行，无论成功或失败
 //传递给Always回调的参数根据成功或失败状态，与Reslove或Reject函数的参数相同
+
+//Always register a callback function for rejected and resolved status
+//if promise is already rejected or resolved, the callback will immediately called.
 func (this *Promise) Always(callback func(v interface{})) *Promise {
 	this.Future.Always(callback)
 	return this
 }
 
 //Cancel一个任务的interface
+
+//Canceller used to check if the promise be requested to cancel, and set the cancelled status
 type Canceller interface {
 	IsCancellationRequested() bool
 	SetCancelled()
 }
 
 //Future代表一个异步任务的readonly-view
+
+//Future provides a read-only view of promise, the value is set by using promise.Resolve, Reject and Cancel methods
 type Future struct {
 	oncePipe             *sync.Once
 	lock                 *sync.Mutex
@@ -126,11 +156,17 @@ func (this *Future) result() *PromiseResult {
 }
 
 //获取Canceller接口，在异步任务内可以通过此对象查询任务是否已经被取消
+
+//Canceller provides a canceller related to future
+//if Canceller return nil, the futrue cannot be cancelled
 func (this *Future) Canceller() Canceller {
 	return this.canceller
 }
 
-//取消异步任务
+//请求取消异步任务
+
+//RequestCancel request to cancel the promise
+//It don't mean the promise be surely cancelled
 func (this *Future) RequestCancel() bool {
 	if this.result() != nil || this.canceller == nil {
 		return false
@@ -140,7 +176,10 @@ func (this *Future) RequestCancel() bool {
 	}
 }
 
-//获得任务是否已经被要求取消
+//判断任务是否已经被要求取消
+
+//IsCancellationRequested returns true if the promise is requested to cancelled,
+//otherwise false.
 func (this *Future) IsCancellationRequested() bool {
 	if this.canceller != nil {
 		return this.canceller.IsCancellationRequested()
@@ -150,6 +189,8 @@ func (this *Future) IsCancellationRequested() bool {
 }
 
 //设置任务为已被取消状态
+
+//SetCancelled set the status that presents the promise is cancelled,
 func (this *Future) SetCancelled() {
 	if this.canceller != nil && this.result() == nil {
 		this.canceller.SetCancelled()
@@ -157,6 +198,8 @@ func (this *Future) SetCancelled() {
 }
 
 //获得任务是否已经被Cancel
+
+//IsCancelled returns true if the promise is cancelled, otherwise false
 func (this *Future) IsCancelled() bool {
 	if this.canceller != nil {
 		return this.canceller.IsCancelled()
