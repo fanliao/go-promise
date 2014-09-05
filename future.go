@@ -19,7 +19,7 @@ import (
 	"runtime"
 	"strconv"
 	"sync"
-	"sync/atomic"
+	//"sync/atomic"
 	"time"
 	"unsafe"
 )
@@ -50,7 +50,7 @@ type PromiseResult struct {
 
 //处理链式调用
 
-//pipe presents the chain promise
+//pipe presents the chain of promise
 type pipe struct {
 	pipeDoneTask, pipeFailTask func(v interface{}) *Future
 	pipePromise                *Promise
@@ -62,7 +62,6 @@ type pipe struct {
 //that is initially unknown, usually because the computation of its
 //value is yet incomplete (refer to wikipedia).
 type Promise struct {
-	onceEnd *sync.Once
 	*Future
 }
 
@@ -93,7 +92,7 @@ func (this *Promise) Reject(err error) (e error) {
 //EnableCanceller set a Promise can be cancelled
 func (this *Promise) EnableCanceller() *Promise {
 	if this.canceller == nil {
-		this.canceller = &canceller{}
+		this.canceller = &canceller{new(once), new(once)}
 	}
 	return this
 }
@@ -140,7 +139,8 @@ type Canceller interface {
 
 //Future provides a read-only view of promise, the value is set by using promise.Resolve, Reject and Cancel methods
 type Future struct {
-	oncePipe             *sync.Once
+	oncePipe             *once
+	onceEnd              *once
 	lock                 *sync.Mutex
 	chOut                chan *PromiseResult
 	dones, fails, always []func(v interface{})
@@ -151,8 +151,11 @@ type Future struct {
 }
 
 func (this *Future) result() *PromiseResult {
-	r := atomic.LoadPointer(&this.r)
-	return (*PromiseResult)(r)
+	if this.onceEnd.IsDone() {
+		return (*PromiseResult)(this.r)
+	} else {
+		return nil
+	}
 }
 
 //获取Canceller接口，在异步任务内可以通过此对象查询任务是否已经被取消
@@ -288,7 +291,6 @@ func (this *Future) Pipe(callbacks ...(func(v interface{}) *Future)) (result *Fu
 		(len(callbacks) == 1 && callbacks[0] == nil) ||
 		(len(callbacks) > 1 && callbacks[0] == nil && callbacks[1] == nil) {
 		result = this
-		fmt.Println("return false")
 		return
 	}
 
@@ -312,35 +314,36 @@ func (this *Future) Pipe(callbacks ...(func(v interface{}) *Future)) (result *Fu
 			})
 		}
 		ok = true
-		fmt.Println("return true")
 	})
 	return
 }
 
 type canceller struct {
-	//lockC       *sync.Mutex
-	isRequested int32
-	isCancelled int32
+	isRequested *once
+	isCancelled *once
 }
 
 //Cancel任务
 func (this *canceller) RequestCancel() {
-	atomic.StoreInt32(&this.isRequested, 1)
+	//atomic.StoreInt32(&this.isRequested, 1)
+	this.isRequested.Done()
 }
 
 //已经被要求取消任务
 func (this *canceller) IsCancellationRequested() (r bool) {
-	return atomic.LoadInt32(&this.isRequested) == 1
+	return this.isRequested.IsDone()
 }
 
 //设置任务已经被Cancel
 func (this *canceller) SetCancelled() {
-	atomic.StoreInt32(&this.isCancelled, 1)
+	//atomic.StoreInt32(&this.isCancelled, 1)
+	this.isCancelled.Done()
 }
 
 //任务已经被Cancel
 func (this *canceller) IsCancelled() (r bool) {
-	return atomic.LoadInt32(&this.isCancelled) == 1
+	//return atomic.LoadInt32(&this.isCancelled) == 1
+	return this.isCancelled.IsDone()
 }
 
 //完成一个任务
@@ -368,7 +371,7 @@ func (this *Promise) end(r *PromiseResult) (e error) { //r *PromiseResult) {
 
 			//fmt.Println("after callback", r)
 			pipeTask, pipePromise := this.getPipe(r.Typ == RESULT_SUCCESS)
-			this.startPipe(pipeTask, pipePromise)
+			this.startPipe(r, pipeTask, pipePromise)
 		}
 		e = nil
 	})
@@ -377,7 +380,7 @@ func (this *Promise) end(r *PromiseResult) (e error) { //r *PromiseResult) {
 
 //set this.r
 func (this *Promise) setResult(r *PromiseResult) {
-	atomic.StorePointer(&this.r, unsafe.Pointer(r))
+	this.r = unsafe.Pointer(r)
 }
 
 //返回与链式调用相关的对象
@@ -391,11 +394,11 @@ func (this *Future) getPipe(isResolved bool) (func(v interface{}) *Future, *Prom
 	}
 }
 
-func (this *Future) startPipe(pipeTask func(v interface{}) *Future, pipePromise *Promise) {
+func (this *Future) startPipe(r *PromiseResult, pipeTask func(v interface{}) *Future, pipePromise *Promise) {
 	//处理链式异步任务
 	//var f *Future
 	if pipeTask != nil {
-		f := pipeTask(this.result().Result)
+		f := pipeTask(r.Result)
 		f.Done(func(v interface{}) {
 			pipePromise.Resolve(v)
 		}).Fail(func(v interface{}) {
@@ -589,9 +592,9 @@ func Wrap(value interface{}) *Future {
 
 //Factory function for Promise
 func NewPromise() *Promise {
-	f := &Promise{new(sync.Once),
+	f := &Promise{
 		&Future{
-			new(sync.Once), new(sync.Mutex),
+			new(once), new(once), new(sync.Mutex),
 			make(chan *PromiseResult, 1),
 			make([]func(v interface{}), 0, 8),
 			make([]func(v interface{}), 0, 8),

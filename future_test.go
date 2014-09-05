@@ -78,15 +78,15 @@ func TestCancel(t *testing.T) {
 }
 
 func TestGetOrTimeout(t *testing.T) {
-	timout := 50 * time.Millisecond
+	timeout := 50 * time.Millisecond
 	c.Convey("When Promise is unfinished", t, func() {
 		p := NewPromise()
 		go func() {
-			<-time.After(timout)
+			<-time.After(timeout)
 			p.Resolve("ok")
 		}()
 		c.Convey("timeout should be true", func() {
-			r, err, timeout := p.GetOrTimeout(10)
+			r, err, timeout := p.GetOrTimeout(20)
 			c.So(timeout, c.ShouldBeTrue)
 			c.So(r, c.ShouldBeNil)
 			c.So(err, c.ShouldBeNil)
@@ -103,11 +103,11 @@ func TestGetOrTimeout(t *testing.T) {
 	c.Convey("When Promise is rejected", t, func() {
 		p := NewPromise()
 		go func() {
-			<-time.After(timout)
+			<-time.After(timeout)
 			p.Reject(errors.New("fail"))
 		}()
 		c.Convey("Should return error", func() {
-			r, err, timeout := p.GetOrTimeout(53)
+			r, err, timeout := p.GetOrTimeout(80)
 			c.So(timeout, c.ShouldBeFalse)
 			c.So(r, c.ShouldBeNil)
 			c.So(err, c.ShouldNotBeNil)
@@ -117,11 +117,11 @@ func TestGetOrTimeout(t *testing.T) {
 	c.Convey("When Promise is cancelled", t, func() {
 		p := NewPromise()
 		go func() {
-			<-time.After(timout)
+			<-time.After(timeout)
 			p.Cancel()
 		}()
 		c.Convey("Should return CancelledError", func() {
-			r, err, timeout := p.GetOrTimeout(53)
+			r, err, timeout := p.GetOrTimeout(80)
 			c.So(timeout, c.ShouldBeFalse)
 			c.So(r, c.ShouldBeNil)
 			c.So(err, c.ShouldHaveSameTypeAs, &CancelledError{})
