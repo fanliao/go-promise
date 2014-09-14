@@ -1,6 +1,7 @@
 package promise
 
 import (
+	"fmt"
 	"sync"
 	"sync/atomic"
 )
@@ -34,9 +35,10 @@ func (o *once) Do(f func()) {
 	// Slow-path.
 	o.m.Lock()
 	defer o.m.Unlock()
-	if o.done == 0 {
+	if atomic.LoadUint32(&o.done) == 0 {
 		f()
 		atomic.StoreUint32(&o.done, 1)
+		fmt.Println("set done = 1")
 	}
 }
 
@@ -47,7 +49,7 @@ func (o *once) Done() {
 	// Slow-path.
 	o.m.Lock()
 	defer o.m.Unlock()
-	if o.done == 0 {
+	if atomic.LoadUint32(&o.done) == 0 {
 		atomic.StoreUint32(&o.done, 1)
 	}
 }
@@ -59,5 +61,7 @@ func (o *once) IsDone() bool {
 	// Slow-path.
 	o.m.Lock()
 	defer o.m.Unlock()
-	return o.done != 0
+	d := atomic.LoadUint32(&o.done)
+	fmt.Println("d =", d)
+	return d != 0
 }

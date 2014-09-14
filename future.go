@@ -24,6 +24,8 @@ import (
 	"unsafe"
 )
 
+var Debug = true
+
 type callbackType int
 
 const (
@@ -351,30 +353,44 @@ func (this *Promise) end(r *PromiseResult) (e error) { //r *PromiseResult) {
 	defer func() {
 		if err := getError(recover()); err != nil {
 			e = err
-			fmt.Println("\nerror in end():", err)
+			println("\nerror in end():", err)
+			panic(newErrorWithStacks(e))
 		}
 	}()
+	isRun := false
 	e = errors.New("Cannot resolve/reject/cancel more than once")
 	this.onceEnd.Do(func() {
-		//fmt.Println("send future result", r)
+		isRun = true
+		if r.Typ == RESULT_SUCCESS {
+			println("set future result", r)
+		} else {
+			println("set future result with error or cancelled", r.Typ)
+		}
 		this.setResult(r)
 
-		//fmt.Println("send", r)
+		if r.Typ == RESULT_SUCCESS {
+			println("sent", r)
+		} else {
+			println("sent", r.Typ)
+		}
 		//让Get函数可以返回
 		this.chOut <- r
 		close(this.chOut)
-		//fmt.Println("close done", r)
 
-		if r.Typ != RESULT_CANCELLED {
+		e = nil
+		println("close done", isRun)
+	})
+	if isRun && r.Typ != RESULT_CANCELLED {
+		execWithLock(this.lock, func() {
 			//任务完成后调用回调函数
+			println("call callback", this.dones, this.fails, this.always)
 			execCallback(r, this.dones, this.fails, this.always)
 
-			//fmt.Println("after callback", r)
+			//println("after callback", r)
 			pipeTask, pipePromise := this.getPipe(r.Typ == RESULT_SUCCESS)
 			this.startPipe(r, pipeTask, pipePromise)
-		}
-		e = nil
-	})
+		})
+	}
 	return
 }
 
@@ -385,8 +401,8 @@ func (this *Promise) setResult(r *PromiseResult) {
 
 //返回与链式调用相关的对象
 func (this *Future) getPipe(isResolved bool) (func(v interface{}) *Future, *Promise) {
-	this.lock.Lock()
-	defer this.lock.Unlock()
+	//this.lock.Lock()
+	//defer this.lock.Unlock()
 	if isResolved {
 		return this.pipeDoneTask, this.pipePromise
 	} else {
@@ -423,6 +439,11 @@ func execCallback(r *PromiseResult, dones []func(v interface{}), fails []func(v 
 		forSlice(s, func(f func(v interface{})) { f(r.Result) })
 	}
 
+	if r.Typ == RESULT_SUCCESS {
+		println("call callback", r, callbacks)
+	} else {
+		println("call callback", r.Typ, callbacks)
+	}
 	forFs(callbacks)
 	forFs(always)
 
@@ -442,12 +463,15 @@ func (this *Future) handleOneCallback(callback func(v interface{}), t callbackTy
 		case CALLBACK_ALWAYS:
 			this.always = append(this.always, callback)
 		}
+		println("add pending action", callback, t)
 	}
 	finalAction := func(r *PromiseResult) {
 		if (t == CALLBACK_DONE && r.Typ == RESULT_SUCCESS) ||
 			(t == CALLBACK_FAIL && r.Typ == RESULT_FAILURE) ||
 			(t == CALLBACK_ALWAYS && r.Typ != RESULT_CANCELLED) {
+			println("begin call fianl action", r, t)
 			callback(r.Result)
+			println("after call fianl action", r, t)
 		}
 	}
 	if f := this.addCallback(pendingAction, finalAction); f != nil {
@@ -458,11 +482,17 @@ func (this *Future) handleOneCallback(callback func(v interface{}), t callbackTy
 //添加回调函数的框架函数
 func (this *Future) addCallback(pendingAction func(), finalAction func(*PromiseResult)) (fun func()) {
 	r := this.result()
+	println("addcallback", r)
 	if r == nil {
 		execWithLock(this.lock, func() {
-			pendingAction()
+			r = this.result()
+			if r == nil {
+				pendingAction()
+				fun = nil
+			} else {
+				fun = func() { finalAction(r) }
+			}
 		})
-		fun = nil
 	} else {
 		fun = func() { finalAction(r) }
 	}
@@ -489,14 +519,14 @@ func Start(act interface{}, syncs ...bool) *Future {
 	if syncs != nil && len(syncs) > 0 && !syncs[0] {
 		r, err := action()
 		if pr.IsCancelled() {
-			//fmt.Println("cancel", r)
+			//println("cancel", r)
 			pr.Cancel()
 		} else {
 			if err == nil {
-				//fmt.Println("resolve", r, stack)
+				//println("resolve", r, stack)
 				pr.Resolve(r)
 			} else {
-				//fmt.Println("reject1===", err, "\n")
+				//println("reject1===", err, "\n")
 				pr.Reject(err)
 			}
 		}
@@ -504,14 +534,14 @@ func Start(act interface{}, syncs ...bool) *Future {
 		go func() {
 			r, err := action()
 			if pr.IsCancelled() {
-				//fmt.Println("cancel", r)
+				//println("cancel", r)
 				pr.Cancel()
 			} else {
 				if err == nil {
-					//fmt.Println("resolve", r, stack)
+					//println("resolve", r, stack)
 					pr.Resolve(r)
 				} else {
-					//fmt.Println("reject1===", err, "\n")
+					//println("reject1===", err, "\n")
 					pr.Reject(err)
 				}
 			}
@@ -646,7 +676,7 @@ func WhenAnyTrue(predicate func(interface{}) bool, fs ...*Future) *Future {
 	} else if len(fs) == 1 {
 		select {
 		case r := <-chFails:
-			//fmt.Println("get err")
+			//println("get err")
 			errs := make([]error, 1)
 			errs[0] = getError(r.result)
 			nf.Reject(newAggregateError("Error appears in WhenAnyTrue:", errs))
@@ -661,19 +691,19 @@ func WhenAnyTrue(predicate func(interface{}) bool, fs ...*Future) *Future {
 		go func() {
 			defer func() {
 				if e := recover(); e != nil {
-					//fmt.Println("reject2", newErrorWithStacks(e))
+					//println("reject2", newErrorWithStacks(e))
 					nf.Reject(newErrorWithStacks(e))
 				}
 			}()
 			j := 0
-			//fmt.Println("start for")
+			//println("start for")
 			for {
 				select {
 				case r := <-chFails:
-					//fmt.Println("get err")
+					//println("get err")
 					rs[r.i] = getError(r.result)
 				case r := <-chDones:
-					//fmt.Println("get return", r)
+					//println("get return", r)
 					if predicate(r.result) {
 						//try to cancel other futures
 						for _, f := range fs {
@@ -699,7 +729,7 @@ func WhenAnyTrue(predicate func(interface{}) bool, fs ...*Future) *Future {
 				}
 
 				if j++; j == len(fs) {
-					//fmt.Println("receive all")
+					//println("receive all")
 					errs, k := make([]error, j), 0
 					for _, r := range rs {
 						switch val := r.(type) {
@@ -717,7 +747,7 @@ func WhenAnyTrue(predicate func(interface{}) bool, fs ...*Future) *Future {
 					break
 				}
 			}
-			//fmt.Println("exit start")
+			//println("exit start")
 
 		}()
 	}
@@ -812,9 +842,9 @@ func WhenAllFuture(fs ...*Future) *Future {
 			if allOk {
 				f.Resolve(rs)
 			} else {
-				//fmt.Println("whenall reject", errs)
+				//println("whenall reject", errs)
 				e := newAggregateError("Error appears in WhenAll:", errs)
-				//fmt.Println("whenall reject2", e.Error())
+				//println("whenall reject2", e.Error())
 				f.Reject(e)
 			}
 		}()
@@ -906,7 +936,7 @@ func newErrorWithStacks(i interface{}) (e error) {
 		fun := runtime.FuncForPC(v)
 		file, line := fun.FileLine(v)
 		name := fun.Name()
-		//fmt.Println(name, file + ":", line)
+		//println(name, file + ":", line)
 		writeStrings(buf, []string{name, " ", file, ":", strconv.Itoa(line), "\n"})
 	}
 	return errors.New(buf.String())
@@ -915,5 +945,13 @@ func newErrorWithStacks(i interface{}) (e error) {
 func writeStrings(buf *bytes.Buffer, strings []string) {
 	for _, s := range strings {
 		buf.WriteString(s)
+	}
+}
+
+func println(a ...interface{}) (n int, err error) {
+	if Debug {
+		return fmt.Println(a...)
+	} else {
+		return 0, nil
 	}
 }
