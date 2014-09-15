@@ -378,28 +378,28 @@ func (this *Promise) end(r *PromiseResult) (e error) { //r *PromiseResult) {
 	this.onceEnd.Do(func() {
 		isRun = true
 		if r.Typ == RESULT_SUCCESS {
-			println("set future result", r)
+			printfln(this.Future, "set future result, r = %#v", r)
 		} else {
-			println("set future result with error or cancelled", r.Typ)
+			printfln(this.Future, "set future result with error or cancelled, r.typ = %#v", r.Typ)
 		}
 		this.setResult(r)
 
 		if r.Typ == RESULT_SUCCESS {
-			println("sent", r)
+			printfln(this.Future, "sent %#v", r)
 		} else {
-			println("sent", r.Typ)
+			printfln(this.Future, "sent error or cancelled %#v", r.Typ)
 		}
 		//让Get函数可以返回
 		this.chOut <- r
 		close(this.chOut)
 
 		e = nil
-		println("close done", isRun)
+		printfln(this.Future, "close done, isRun = %#v", isRun)
 	})
 	if isRun && r.Typ != RESULT_CANCELLED {
 		execWithLock(this.lock, func() {
 			//任务完成后调用回调函数
-			println("call callback", this.dones, this.fails, this.always)
+			printfln(this.Future, "call callback, r is null? %#v, %#v, %#v", r == nil, this.dones, this.fails, this.always)
 			execCallback(r, this.dones, this.fails, this.always)
 
 			//println("after callback", r)
@@ -984,7 +984,7 @@ func printf(this *Future, format string, a ...interface{}) (n int, err error) {
 
 func printfln(this *Future, format string, a ...interface{}) (n int, err error) {
 	if Debug {
-		fmt.Printf("promise id = %#V; ", this.id)
+		fmt.Printf("promise id = %#v; ", this.id)
 		return fmt.Printf(format+"\n", a...)
 	} else {
 		return 0, nil
