@@ -20,11 +20,12 @@ import (
 	"strconv"
 	"sync"
 	//"sync/atomic"
+	"math/rand"
 	"time"
 	"unsafe"
 )
 
-var Debug = true
+var Debug = false
 
 type callbackType int
 
@@ -93,9 +94,12 @@ func (this *Promise) Reject(err error) (e error) {
 
 //EnableCanceller set a Promise can be cancelled
 func (this *Promise) EnableCanceller() *Promise {
-	if this.canceller == nil {
-		this.canceller = &canceller{new(once), new(once)}
-	}
+	execWithLock(this.lock, func() {
+		if this.canceller == nil {
+			this.canceller = &canceller{new(once), new(once)}
+			printfln(this.Future, "enable canceller")
+		}
+	})
 	return this
 }
 
@@ -141,6 +145,7 @@ type Canceller interface {
 
 //Future provides a read-only view of promise, the value is set by using promise.Resolve, Reject and Cancel methods
 type Future struct {
+	Id                   int
 	oncePipe             *once
 	onceEnd              *once
 	lock                 *sync.Mutex
@@ -152,12 +157,14 @@ type Future struct {
 	*canceller //*PromiseCanceller
 }
 
-func (this *Future) result() *PromiseResult {
+func (this *Future) result() (r *PromiseResult) {
 	if this.onceEnd.IsDone() {
-		return (*PromiseResult)(this.r)
+		r = (*PromiseResult)(this.r)
 	} else {
-		return nil
+		r = nil
 	}
+	printfln(this, "get result = %#v", r)
+	return
 }
 
 //获取Canceller接口，在异步任务内可以通过此对象查询任务是否已经被取消
@@ -172,25 +179,29 @@ func (this *Future) Canceller() Canceller {
 
 //RequestCancel request to cancel the promise
 //It don't mean the promise be surely cancelled
-func (this *Future) RequestCancel() bool {
+func (this *Future) RequestCancel() (r bool) {
 	if this.result() != nil || this.canceller == nil {
-		return false
+		r = false
 	} else {
 		this.canceller.RequestCancel()
-		return true
+		r = true
 	}
+	printfln(this, "Request Cancel, return %t", r)
+	return
 }
 
 //判断任务是否已经被要求取消
 
 //IsCancellationRequested returns true if the promise is requested to cancelled,
 //otherwise false.
-func (this *Future) IsCancellationRequested() bool {
+func (this *Future) IsCancellationRequested() (r bool) {
 	if this.canceller != nil {
-		return this.canceller.IsCancellationRequested()
+		r = this.canceller.IsCancellationRequested()
 	} else {
-		return false
+		r = false
 	}
+	printfln(this, "IsCancellationRequested? return %t", r)
+	return
 }
 
 //设置任务为已被取消状态
@@ -199,18 +210,21 @@ func (this *Future) IsCancellationRequested() bool {
 func (this *Future) SetCancelled() {
 	if this.canceller != nil && this.result() == nil {
 		this.canceller.SetCancelled()
+		printfln(this, "SetCancelled")
 	}
 }
 
 //获得任务是否已经被Cancel
 
 //IsCancelled returns true if the promise is cancelled, otherwise false
-func (this *Future) IsCancelled() bool {
+func (this *Future) IsCancelled() (r bool) {
 	if this.canceller != nil {
-		return this.canceller.IsCancelled()
+		r = this.canceller.IsCancelled()
 	} else {
-		return false
+		r = false
 	}
+	printfln(this, "IsCancelled? return %t", r)
+	return
 }
 
 func (this *Future) GetChan() chan *PromiseResult {
@@ -219,18 +233,20 @@ func (this *Future) GetChan() chan *PromiseResult {
 
 //Get函数将一直阻塞直到任务完成,并返回任务的结果
 //如果任务已经完成，后续的Get将直接返回任务结果
-func (this *Future) Get() (interface{}, error) {
+func (this *Future) Get() (r interface{}, e error) {
 	if fr, ok := <-this.chOut; ok {
-		return getFutureReturnVal(fr) //fr.Result, fr.Typ
+		r, e = getFutureReturnVal(fr) //fr.Result, fr.Typ
 	} else {
-		return getFutureReturnVal(this.result()) //r, typ
+		r, e = getFutureReturnVal(this.result()) //r, typ
 	}
+	printfln(this, "get future result, r = %#v, e = %#v", r, e)
+	return
 }
 
 //Get函数将一直阻塞直到任务完成或超过指定的Timeout时间
 //如果任务已经完成，后续的Get将直接返回任务结果
 //mm的单位是毫秒
-func (this *Future) GetOrTimeout(mm int) (interface{}, error, bool) {
+func (this *Future) GetOrTimeout(mm int) (r interface{}, e error, t bool) {
 	if mm == 0 {
 		mm = 10
 	} else {
@@ -239,17 +255,17 @@ func (this *Future) GetOrTimeout(mm int) (interface{}, error, bool) {
 
 	select {
 	case <-time.After((time.Duration)(mm) * time.Nanosecond):
-		return nil, nil, true
+		r, e, t = nil, nil, true
 	case fr, ok := <-this.chOut:
+		t = false
 		if ok {
-			r, err := getFutureReturnVal(fr)
-			return r, err, false
+			r, e = getFutureReturnVal(fr)
 		} else {
-			r, err := getFutureReturnVal(this.result())
-			return r, err, false
+			r, e = getFutureReturnVal(this.result())
 		}
-
 	}
+	printfln(this, "get future result or timeout, r = %#v, e = %#v, timeout = %#t", r, e, t)
+	return
 }
 
 func getFutureReturnVal(r *PromiseResult) (interface{}, error) {
@@ -353,7 +369,7 @@ func (this *Promise) end(r *PromiseResult) (e error) { //r *PromiseResult) {
 	defer func() {
 		if err := getError(recover()); err != nil {
 			e = err
-			println("\nerror in end():", err)
+			printfln(this.Future, "\nerror in end(): %#v", err)
 			panic(newErrorWithStacks(e))
 		}
 	}()
@@ -362,31 +378,25 @@ func (this *Promise) end(r *PromiseResult) (e error) { //r *PromiseResult) {
 	this.onceEnd.Do(func() {
 		isRun = true
 		if r.Typ == RESULT_SUCCESS {
-			println("set future result", r)
+			printfln(this.Future, "set future result %#v", r)
 		} else {
-			println("set future result with error or cancelled", r.Typ)
+			printfln(this.Future, "set future result with error or cancelled %#v", r.Typ)
 		}
 		this.setResult(r)
 
-		if r.Typ == RESULT_SUCCESS {
-			println("sent", r)
-		} else {
-			println("sent", r.Typ)
-		}
 		//让Get函数可以返回
 		this.chOut <- r
 		close(this.chOut)
 
 		e = nil
-		println("close done", isRun)
+		printfln(this.Future, "close done %#v", isRun)
 	})
 	if isRun && r.Typ != RESULT_CANCELLED {
 		execWithLock(this.lock, func() {
 			//任务完成后调用回调函数
-			println("call callback", this.dones, this.fails, this.always)
+			printfln(this.Future, "before call callback %#v %#v %#v", this.dones, this.fails, this.always)
 			execCallback(r, this.dones, this.fails, this.always)
 
-			//println("after callback", r)
 			pipeTask, pipePromise := this.getPipe(r.Typ == RESULT_SUCCESS)
 			this.startPipe(r, pipeTask, pipePromise)
 		})
@@ -440,9 +450,9 @@ func execCallback(r *PromiseResult, dones []func(v interface{}), fails []func(v 
 	}
 
 	if r.Typ == RESULT_SUCCESS {
-		println("call callback", r, callbacks)
+		fmt.Println("call callback", r, callbacks)
 	} else {
-		println("call callback", r.Typ, callbacks)
+		fmt.Println("call callback", r.Typ, callbacks)
 	}
 	forFs(callbacks)
 	forFs(always)
@@ -463,15 +473,15 @@ func (this *Future) handleOneCallback(callback func(v interface{}), t callbackTy
 		case CALLBACK_ALWAYS:
 			this.always = append(this.always, callback)
 		}
-		println("add pending action", callback, t)
+		printfln(this, "add pending action, callback is %#v, type is %#v", callback, t)
 	}
 	finalAction := func(r *PromiseResult) {
 		if (t == CALLBACK_DONE && r.Typ == RESULT_SUCCESS) ||
 			(t == CALLBACK_FAIL && r.Typ == RESULT_FAILURE) ||
 			(t == CALLBACK_ALWAYS && r.Typ != RESULT_CANCELLED) {
-			println("begin call fianl action", r, t)
+			printfln(this, "before call final action, r isnull? type is %#v", r == nil, t)
 			callback(r.Result)
-			println("after call fianl action", r, t)
+			printfln(this, "after call final action, r isnull? type is %#v", r == nil, t)
 		}
 	}
 	if f := this.addCallback(pendingAction, finalAction); f != nil {
@@ -624,6 +634,7 @@ func Wrap(value interface{}) *Future {
 func NewPromise() *Promise {
 	f := &Promise{
 		&Future{
+			rand.Int(),
 			new(once), new(once), new(sync.Mutex),
 			make(chan *PromiseResult, 1),
 			make([]func(v interface{}), 0, 8),
@@ -951,6 +962,26 @@ func writeStrings(buf *bytes.Buffer, strings []string) {
 func println(a ...interface{}) (n int, err error) {
 	if Debug {
 		return fmt.Println(a...)
+	} else {
+		return 0, nil
+	}
+}
+
+func printf(this *Future, format string, a ...interface{}) (n int, err error) {
+	if Debug {
+		log := fmt.Sprintf(format, a...)
+		log = log + fmt.Sprintf(". promise id = %#v", this.Id)
+		return fmt.Print(log)
+	} else {
+		return 0, nil
+	}
+}
+
+func printfln(this *Future, format string, a ...interface{}) (n int, err error) {
+	if Debug {
+		log := fmt.Sprintf(format, a...)
+		log = log + fmt.Sprintf(". promise id = %#v\n", this.Id)
+		return fmt.Print(log)
 	} else {
 		return 0, nil
 	}
