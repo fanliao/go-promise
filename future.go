@@ -449,11 +449,6 @@ func execCallback(r *PromiseResult, dones []func(v interface{}), fails []func(v 
 		forSlice(s, func(f func(v interface{})) { f(r.Result) })
 	}
 
-	if r.Typ == RESULT_SUCCESS {
-		fmt.Println("call callback", r, callbacks)
-	} else {
-		fmt.Println("call callback", r.Typ, callbacks)
-	}
 	forFs(callbacks)
 	forFs(always)
 
