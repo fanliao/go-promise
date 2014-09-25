@@ -245,7 +245,7 @@ func (this *Future) RequestCancel() (r bool) {
 func (this *Future) IsCancellationRequested() (r bool) {
 	c := this.Canceller()
 	if c != nil {
-		r = this.canceller.IsCancellationRequested()
+		r = c.IsCancellationRequested()
 	} else {
 		r = false
 	}
