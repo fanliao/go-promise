@@ -16,11 +16,11 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math/rand"
 	"runtime"
 	"strconv"
 	"sync"
 	//"sync/atomic"
-	"math/rand"
 	"time"
 	"unsafe"
 )
@@ -92,17 +92,6 @@ func (this *Promise) Reject(err error) (e error) {
 	return this.end(&PromiseResult{err, RESULT_FAILURE})
 }
 
-//EnableCanceller set a Promise can be cancelled
-func (this *Promise) EnableCanceller() *Promise {
-	execWithLock(this.lock, func() {
-		if this.canceller == nil {
-			this.canceller = &canceller{new(once), new(once)}
-			printfln(this.Future, "enable canceller")
-		}
-	})
-	return this
-}
-
 //添加一个任务成功完成时的回调，如果任务已经成功完成，则直接执行回调函数
 //传递给Done函数的参数与Reslove函数的参数相同
 
@@ -146,33 +135,76 @@ type Canceller interface {
 //Future provides a read-only view of promise, the value is set by using promise.Resolve, Reject and Cancel methods
 type Future struct {
 	Id                   int
-	oncePipe             *once
-	onceEnd              *once
-	lock                 *sync.Mutex
-	chOut                chan *PromiseResult
+	runChan              chan *cmd
+	r                    *PromiseResult
 	dones, fails, always []func(v interface{})
 	pipe
-	//r          *PromiseResult
-	r          unsafe.Pointer
 	*canceller //*PromiseCanceller
+	chOut      chan *PromiseResult
+
+	oncePipe *once
+	onceEnd  *once
+	lock     *sync.Mutex
+	//r          *PromiseResult
+
+	//Id                   int
+	//oncePipe             *once
+	//onceEnd              *once
+	//lock                 *sync.Mutex
+	//chOut                chan *PromiseResult
+	//dones, fails, always []func(v interface{})
+	//pipe
+	////r          *PromiseResult
+	//r          unsafe.Pointer
+	//*canceller //*PromiseCanceller
+}
+
+func (this *Future) start() {
+	go func() {
+		for v := range this.runChan {
+			switch v.typ {
+			case RESOLVED, REJECTED:
+
+			case REJECTED:
+			case CANCELLER_BE_ENABLE:
+			case CANCELLER_BE_REQUESTED:
+			case CANCELLED:
+			}
+		}
+	}()
 }
 
 func (this *Future) result() (r *PromiseResult) {
-	if this.onceEnd.IsDone() {
-		r = (*PromiseResult)(this.r)
-	} else {
-		r = nil
-	}
+	//if this.onceEnd.IsDone() {
+	//	r = (*PromiseResult)(this.r)
+	//} else {
+	//	r = nil
+	//}
+	r = this.r
 	printfln(this, "get result = %#v", r)
 	return
+}
+
+//EnableCanceller set a Promise can be cancelled
+func (this *Promise) EnableCanceller() *Promise {
+	//execWithLock(this.lock, func() {
+	if this.canceller == nil {
+		this.canceller = &canceller{new(once), new(once)}
+		printfln(this.Future, "enable canceller")
+	}
+	//})
+	return this
 }
 
 //获取Canceller接口，在异步任务内可以通过此对象查询任务是否已经被取消
 
 //Canceller provides a canceller related to future
 //if Canceller return nil, the futrue cannot be cancelled
-func (this *Future) Canceller() Canceller {
-	return this.canceller
+func (this *Future) Canceller() (c Canceller) {
+	//execWithLock(this.lock, func() {
+	c = this.canceller
+	//})
+	return
 }
 
 //请求取消异步任务
@@ -981,3 +1013,113 @@ func printfln(this *Future, format string, a ...interface{}) (n int, err error) 
 		return 0, nil
 	}
 }
+
+type cmdType int
+
+const (
+	NEW cmdType = iota
+	RESOLVED
+	REJECTED
+	CANCELLER_BE_ENABLE
+	CANCELLER_BE_REQUESTED
+	CANCELLED
+)
+
+type cmd struct {
+	typ   cmdType
+	val   interface{}
+	rChan chan interface{}
+}
+
+////Future provides a read-only view of promise, the value is set by using promise.Resolve, Reject and Cancel methods
+//type Future1 struct {
+//	Id                   int
+//	runChan              chan *cmd
+//	r                    *PromiseResult
+//	dones, fails, always []func(v interface{})
+//	pipe
+//	*canceller //*PromiseCanceller
+//	chOut      chan *PromiseResult
+
+//	oncePipe *once
+//	onceEnd  *once
+//	lock     *sync.Mutex
+//	//r          *PromiseResult
+//}
+
+//func (this *Future1) start() {
+//	go func() {
+//		for v := range this.runChan {
+//			switch v.typ {
+//			case RESOLVED, REJECTED:
+
+//			case REJECTED:
+//			case CANCELLER_BE_ENABLE:
+//			case CANCELLER_BE_REQUESTED:
+//			case CANCELLED:
+//			}
+//		}
+//	}()
+//}
+
+////完成一个任务
+//func (this *Future1) end(r *PromiseResult) (e error) { //r *PromiseResult) {
+//	defer func() {
+//		if err := getError(recover()); err != nil {
+//			e = err
+//			printfln(this.Future, "\nerror in end(): %#v", err)
+//			panic(newErrorWithStacks(e))
+//		}
+//	}()
+//	if r != nil {
+//		return errors.New("Cannot resolve/reject/cancel more than once")
+//	}
+
+//	if r.Typ == RESULT_SUCCESS {
+//		printfln(this.Future, "set future result %#v", r)
+//	} else {
+//		printfln(this.Future, "set future result with error or cancelled %#v", r.Typ)
+//	}
+//	this.setResult(r)
+
+//	//让Get函数可以返回
+//	this.chOut <- r
+
+//	//任务完成后调用回调函数
+//	printfln(this.Future, "before call callback %#v %#v %#v", this.dones, this.fails, this.always)
+//	execCallback(r, this.dones, this.fails, this.always)
+
+//	pipeTask, pipePromise := this.getPipe(r.Typ == RESULT_SUCCESS)
+//	this.startPipe(r, pipeTask, pipePromise)
+//	close(this.chOut)
+
+//	//isRun := false
+//	//e = errors.New("Cannot resolve/reject/cancel more than once")
+//	//this.onceEnd.Do(func() {
+//	//	isRun = true
+//	//	if r.Typ == RESULT_SUCCESS {
+//	//		printfln(this.Future, "set future result %#v", r)
+//	//	} else {
+//	//		printfln(this.Future, "set future result with error or cancelled %#v", r.Typ)
+//	//	}
+//	//	this.setResult(r)
+
+//	//	//让Get函数可以返回
+//	//	this.chOut <- r
+//	//	close(this.chOut)
+
+//	//	e = nil
+//	//	printfln(this.Future, "close done %#v", isRun)
+//	//})
+//	//if isRun && r.Typ != RESULT_CANCELLED {
+//	//	execWithLock(this.lock, func() {
+//	//		//任务完成后调用回调函数
+//	//		printfln(this.Future, "before call callback %#v %#v %#v", this.dones, this.fails, this.always)
+//	//		execCallback(r, this.dones, this.fails, this.always)
+
+//	//		pipeTask, pipePromise := this.getPipe(r.Typ == RESULT_SUCCESS)
+//	//		this.startPipe(r, pipeTask, pipePromise)
+//	//	})
+//	//}
+//	return
+//}
