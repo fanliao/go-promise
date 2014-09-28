@@ -136,6 +136,13 @@ type Canceller interface {
 	SetCancelled()
 }
 
+//保存Future状态数据的结构
+type futureVal struct {
+	dones, fails, always []func(v interface{})
+	pipe
+	r unsafe.Pointer
+}
+
 //Future代表一个异步任务的readonly-view
 
 //Future provides a read-only view of promise, the value is set by using promise.Resolve, Reject and Cancel methods
@@ -143,17 +150,26 @@ type Future struct {
 	oncePipe             *sync.Once
 	lock                 *sync.Mutex
 	chOut                chan *PromiseResult
+	chEnd                chan struct{}
 	dones, fails, always []func(v interface{})
 	pipe
 	//r          *PromiseResult
-	r          unsafe.Pointer
+	r unsafe.Pointer
+	//指向futureVal的指针，程序要保证该指针指向的对象内容不会发送变化，任何变化都必须生成新对象并通过原子操作更新指针，以避免lock
+	//v          unsafe.Pointer
 	*canceller //*PromiseCanceller
 }
 
 func (this *Future) result() *PromiseResult {
 	r := atomic.LoadPointer(&this.r)
+	//val := this.val()
 	return (*PromiseResult)(r)
 }
+
+//func (this *Future) val() *futureVal {
+//	r := atomic.LoadPointer(&this.v)
+//	return (*futureVal)(r)
+//}
 
 //获取Canceller接口，在异步任务内可以通过此对象查询任务是否已经被取消
 
@@ -215,11 +231,12 @@ func (this *Future) GetChan() chan *PromiseResult {
 //Get函数将一直阻塞直到任务完成,并返回任务的结果
 //如果任务已经完成，后续的Get将直接返回任务结果
 func (this *Future) Get() (interface{}, error) {
-	if fr, ok := <-this.chOut; ok {
-		return getFutureReturnVal(fr) //fr.Result, fr.Typ
-	} else {
-		return getFutureReturnVal(this.result()) //r, typ
-	}
+	<-this.chEnd
+	//if fr, ok := <-this.chOut; ok {
+	//	return getFutureReturnVal(fr) //fr.Result, fr.Typ
+	//} else {
+	return getFutureReturnVal(this.result()) //r, typ
+	//}
 }
 
 //Get函数将一直阻塞直到任务完成或超过指定的Timeout时间
@@ -235,14 +252,14 @@ func (this *Future) GetOrTimeout(mm int) (interface{}, error, bool) {
 	select {
 	case <-time.After((time.Duration)(mm) * time.Nanosecond):
 		return nil, nil, true
-	case fr, ok := <-this.chOut:
-		if ok {
-			r, err := getFutureReturnVal(fr)
-			return r, err, false
-		} else {
-			r, err := getFutureReturnVal(this.result())
-			return r, err, false
-		}
+	case <-this.chEnd:
+		//if ok {
+		//	r, err := getFutureReturnVal(fr)
+		//	return r, err, false
+		//} else {
+		r, err := getFutureReturnVal(this.result())
+		return r, err, false
+		//}
 
 	}
 }
@@ -318,29 +335,28 @@ func (this *Future) Pipe(callbacks ...(func(v interface{}) *Future)) (result *Fu
 }
 
 type canceller struct {
-	//lockC       *sync.Mutex
-	isRequested int32
-	isCancelled int32
+	status int32
 }
 
 //Cancel任务
 func (this *canceller) RequestCancel() {
-	atomic.StoreInt32(&this.isRequested, 1)
+	//只有当状态==0（表示初始状态）时才可以请求取消任务
+	atomic.CompareAndSwapInt32(&this.status, 0, 1)
 }
 
 //已经被要求取消任务
 func (this *canceller) IsCancellationRequested() (r bool) {
-	return atomic.LoadInt32(&this.isRequested) == 1
+	return atomic.LoadInt32(&this.status) == 1
 }
 
 //设置任务已经被Cancel
 func (this *canceller) SetCancelled() {
-	atomic.StoreInt32(&this.isCancelled, 1)
+	atomic.StoreInt32(&this.status, 2)
 }
 
 //任务已经被Cancel
 func (this *canceller) IsCancelled() (r bool) {
-	return atomic.LoadInt32(&this.isCancelled) == 1
+	return atomic.LoadInt32(&this.status) == 2
 }
 
 //完成一个任务
@@ -359,7 +375,7 @@ func (this *Promise) end(r *PromiseResult) (e error) { //r *PromiseResult) {
 		//fmt.Println("send", r)
 		//让Get函数可以返回
 		this.chOut <- r
-		close(this.chOut)
+		close(this.chEnd)
 		//fmt.Println("close done", r)
 
 		if r.Typ != RESULT_CANCELLED {
@@ -593,6 +609,7 @@ func NewPromise() *Promise {
 		&Future{
 			new(sync.Once), new(sync.Mutex),
 			make(chan *PromiseResult, 1),
+			make(chan struct{}),
 			make([]func(v interface{}), 0, 8),
 			make([]func(v interface{}), 0, 8),
 			make([]func(v interface{}), 0, 4),
