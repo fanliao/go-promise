@@ -147,29 +147,29 @@ type futureVal struct {
 
 //Future provides a read-only view of promise, the value is set by using promise.Resolve, Reject and Cancel methods
 type Future struct {
-	oncePipe             *sync.Once
-	lock                 *sync.Mutex
-	chOut                chan *PromiseResult
-	chEnd                chan struct{}
-	dones, fails, always []func(v interface{})
-	pipe
-	//r          *PromiseResult
-	r unsafe.Pointer
+	oncePipe *sync.Once
+	lock     *sync.Mutex
+	chOut    chan *PromiseResult
+	chEnd    chan struct{}
+	//dones, fails, always []func(v interface{})
+	//pipe
+	////r          *PromiseResult
+	//r unsafe.Pointer
 	//指向futureVal的指针，程序要保证该指针指向的对象内容不会发送变化，任何变化都必须生成新对象并通过原子操作更新指针，以避免lock
-	//v          unsafe.Pointer
+	v          unsafe.Pointer
 	*canceller //*PromiseCanceller
 }
 
 func (this *Future) result() *PromiseResult {
-	r := atomic.LoadPointer(&this.r)
-	//val := this.val()
-	return (*PromiseResult)(r)
+	//r := atomic.LoadPointer(&this.r)
+	val := this.val()
+	return (*PromiseResult)(val.r)
 }
 
-//func (this *Future) val() *futureVal {
-//	r := atomic.LoadPointer(&this.v)
-//	return (*futureVal)(r)
-//}
+func (this *Future) val() *futureVal {
+	r := atomic.LoadPointer(&this.v)
+	return (*futureVal)(r)
+}
 
 //获取Canceller接口，在异步任务内可以通过此对象查询任务是否已经被取消
 
@@ -310,24 +310,48 @@ func (this *Future) Pipe(callbacks ...(func(v interface{}) *Future)) (result *Fu
 	}
 
 	this.oncePipe.Do(func() {
-		r := this.result()
-		if r != nil {
-			result = this
-			if r.Typ == RESULT_SUCCESS && callbacks[0] != nil {
-				result = (callbacks[0](r.Result))
-			} else if r.Typ != RESULT_FAILURE && len(callbacks) > 1 && callbacks[1] != nil {
-				result = (callbacks[1](r.Result))
-			}
-		} else {
-			execWithLock(this.lock, func() {
-				this.pipeDoneTask = callbacks[0]
-				if len(callbacks) > 1 {
-					this.pipeFailTask = callbacks[1]
+		for {
+			v := this.val()
+			r := (*PromiseResult)(v.r)
+			if r != nil {
+				result = this
+				if r.Typ == RESULT_SUCCESS && callbacks[0] != nil {
+					result = (callbacks[0](r.Result))
+				} else if r.Typ == RESULT_FAILURE && len(callbacks) > 1 && callbacks[1] != nil {
+					result = (callbacks[1](r.Result))
 				}
-				this.pipePromise = NewPromise()
-				result = this.pipePromise.Future
-			})
+			} else {
+				newVal := *v
+				newVal.pipeDoneTask = callbacks[0]
+				if len(callbacks) > 1 {
+					newVal.pipeFailTask = callbacks[1]
+				}
+				newVal.pipePromise = NewPromise()
+				//通过CAS操作检测Future对象的原始状态未发生改变，否则需要重试
+				if atomic.CompareAndSwapPointer(&this.v, unsafe.Pointer(v), unsafe.Pointer(&newVal)) {
+					result = newVal.pipePromise.Future
+					break
+				}
+			}
 		}
+		//r := this.result()
+		//if r != nil {
+		//	result = this
+		//	if r.Typ == RESULT_SUCCESS && callbacks[0] != nil {
+		//		result = (callbacks[0](r.Result))
+		//	} else if r.Typ != RESULT_FAILURE && len(callbacks) > 1 && callbacks[1] != nil {
+		//		result = (callbacks[1](r.Result))
+		//	}
+		//} else {
+		//	execWithLock(this.lock, func() {
+		//		this.pipeDoneTask = callbacks[0]
+		//		if len(callbacks) > 1 {
+		//			this.pipeFailTask = callbacks[1]
+		//		}
+		//		this.pipePromise = NewPromise()
+		//		result = this.pipePromise.Future
+		//	})
+		//}
 		ok = true
 		fmt.Println("return true")
 	})
@@ -370,36 +394,60 @@ func (this *Promise) end(r *PromiseResult) (e error) { //r *PromiseResult) {
 	e = errors.New("Cannot resolve/reject/cancel more than once")
 	this.onceEnd.Do(func() {
 		//fmt.Println("send future result", r)
-		this.setResult(r)
+		for {
+			v := this.val()
+			newVal := *v
+			newVal.r = unsafe.Pointer(r)
 
-		//fmt.Println("send", r)
-		//让Get函数可以返回
-		this.chOut <- r
-		close(this.chEnd)
-		//fmt.Println("close done", r)
+			if atomic.CompareAndSwapPointer(&this.v, unsafe.Pointer(v), unsafe.Pointer(&newVal)) {
+				//fmt.Println("send", r)
+				this.chOut <- r
+				//让Get函数可以返回
+				close(this.chEnd)
+				//fmt.Println("close done", r)
 
-		if r.Typ != RESULT_CANCELLED {
-			//任务完成后调用回调函数
-			execCallback(r, this.dones, this.fails, this.always)
+				if r.Typ != RESULT_CANCELLED {
+					//任务完成后调用回调函数
+					execCallback(r, v.dones, v.fails, v.always)
 
-			//fmt.Println("after callback", r)
-			pipeTask, pipePromise := this.getPipe(r.Typ == RESULT_SUCCESS)
-			this.startPipe(pipeTask, pipePromise)
+					//fmt.Println("after callback", r)
+					pipeTask, pipePromise := v.getPipe(r.Typ == RESULT_SUCCESS)
+					startPipe(r, pipeTask, pipePromise)
+				}
+				e = nil
+				break
+			}
+			//this.setResult(r)
+
+			////fmt.Println("send", r)
+			//this.chOut <- r
+			////让Get函数可以返回
+			//close(this.chEnd)
+			////fmt.Println("close done", r)
+
+			//if r.Typ != RESULT_CANCELLED {
+			//	//任务完成后调用回调函数
+			//	execCallback(r, this.dones, this.fails, this.always)
+
+			//	//fmt.Println("after callback", r)
+			//	pipeTask, pipePromise := this.getPipe(r.Typ == RESULT_SUCCESS)
+			//	this.startPipe(pipeTask, pipePromise)
+			//}
+			//e = nil
 		}
-		e = nil
 	})
 	return
 }
 
-//set this.r
-func (this *Promise) setResult(r *PromiseResult) {
-	atomic.StorePointer(&this.r, unsafe.Pointer(r))
-}
+////set this.r
+//func (this *Promise) setResult(r *PromiseResult) {
+//	atomic.StorePointer(&this.r, unsafe.Pointer(r))
+//}
 
 //返回与链式调用相关的对象
-func (this *Future) getPipe(isResolved bool) (func(v interface{}) *Future, *Promise) {
-	this.lock.Lock()
-	defer this.lock.Unlock()
+func (this *futureVal) getPipe(isResolved bool) (func(v interface{}) *Future, *Promise) {
+	//this.lock.Lock()
+	//defer this.lock.Unlock()
 	if isResolved {
 		return this.pipeDoneTask, this.pipePromise
 	} else {
@@ -407,11 +455,11 @@ func (this *Future) getPipe(isResolved bool) (func(v interface{}) *Future, *Prom
 	}
 }
 
-func (this *Future) startPipe(pipeTask func(v interface{}) *Future, pipePromise *Promise) {
+func startPipe(r *PromiseResult, pipeTask func(v interface{}) *Future, pipePromise *Promise) {
 	//处理链式异步任务
 	//var f *Future
 	if pipeTask != nil {
-		f := pipeTask(this.result().Result)
+		f := pipeTask(r.Result)
 		f.Done(func(v interface{}) {
 			pipePromise.Resolve(v)
 		}).Fail(func(v interface{}) {
@@ -446,42 +494,68 @@ func (this *Future) handleOneCallback(callback func(v interface{}), t callbackTy
 	if callback == nil {
 		return
 	}
-	pendingAction := func() {
-		switch t {
-		case CALLBACK_DONE:
-			this.dones = append(this.dones, callback)
-		case CALLBACK_FAIL:
-			this.fails = append(this.fails, callback)
-		case CALLBACK_ALWAYS:
-			this.always = append(this.always, callback)
+
+	for {
+		v := this.val()
+		r := (*PromiseResult)(v.r)
+		if r == nil {
+			newVal := *v
+			switch t {
+			case CALLBACK_DONE:
+				newVal.dones = append(newVal.dones, callback)
+			case CALLBACK_FAIL:
+				newVal.fails = append(newVal.fails, callback)
+			case CALLBACK_ALWAYS:
+				newVal.always = append(newVal.always, callback)
+			}
+			if atomic.CompareAndSwapPointer(&this.v, unsafe.Pointer(v), unsafe.Pointer(&newVal)) {
+				break
+			}
+		} else {
+			if (t == CALLBACK_DONE && r.Typ == RESULT_SUCCESS) ||
+				(t == CALLBACK_FAIL && r.Typ == RESULT_FAILURE) ||
+				(t == CALLBACK_ALWAYS && r.Typ != RESULT_CANCELLED) {
+				callback(r.Result)
+			}
+			break
 		}
 	}
-	finalAction := func(r *PromiseResult) {
-		if (t == CALLBACK_DONE && r.Typ == RESULT_SUCCESS) ||
-			(t == CALLBACK_FAIL && r.Typ == RESULT_FAILURE) ||
-			(t == CALLBACK_ALWAYS && r.Typ != RESULT_CANCELLED) {
-			callback(r.Result)
-		}
-	}
-	if f := this.addCallback(pendingAction, finalAction); f != nil {
-		f()
-	}
+	//pendingAction := func() {
+	//	switch t {
+	//	case CALLBACK_DONE:
+	//		this.dones = append(this.dones, callback)
+	//	case CALLBACK_FAIL:
+	//		this.fails = append(this.fails, callback)
+	//	case CALLBACK_ALWAYS:
+	//		this.always = append(this.always, callback)
+	//	}
+	//}
+	//finalAction := func(r *PromiseResult) {
+	//	if (t == CALLBACK_DONE && r.Typ == RESULT_SUCCESS) ||
+	//		(t == CALLBACK_FAIL && r.Typ == RESULT_FAILURE) ||
+	//		(t == CALLBACK_ALWAYS && r.Typ != RESULT_CANCELLED) {
+	//		callback(r.Result)
+	//	}
+	//}
+	//if f := this.addCallback(pendingAction, finalAction); f != nil {
+	//	f()
+	//}
 }
 
-//添加回调函数的框架函数
-func (this *Future) addCallback(pendingAction func(), finalAction func(*PromiseResult)) (fun func()) {
-	r := this.result()
-	if r == nil {
-		execWithLock(this.lock, func() {
-			pendingAction()
-		})
-		fun = nil
-	} else {
-		fun = func() { finalAction(r) }
-	}
+////添加回调函数的框架函数
+//func (this *Future) addCallback(pendingAction func(), finalAction func(*PromiseResult)) (fun func()) {
+//	r := this.result()
+//	if r == nil {
+//		execWithLock(this.lock, func() {
+//			pendingAction()
+//		})
+//		fun = nil
+//	} else {
+//		fun = func() { finalAction(r) }
+//	}
 
-	return
-}
+//	return
+//}
 
 //异步或同步执行一个函数。并以Future包装函数返回值返回
 func Start(act interface{}, syncs ...bool) *Future {
@@ -605,15 +679,19 @@ func Wrap(value interface{}) *Future {
 
 //Factory function for Promise
 func NewPromise() *Promise {
+	val := &futureVal{
+		make([]func(v interface{}), 0, 8),
+		make([]func(v interface{}), 0, 8),
+		make([]func(v interface{}), 0, 4),
+		pipe{}, nil,
+	}
 	f := &Promise{new(sync.Once),
 		&Future{
 			new(sync.Once), new(sync.Mutex),
 			make(chan *PromiseResult, 1),
 			make(chan struct{}),
-			make([]func(v interface{}), 0, 8),
-			make([]func(v interface{}), 0, 8),
-			make([]func(v interface{}), 0, 4),
-			pipe{}, nil, nil,
+			unsafe.Pointer(val),
+			nil,
 		},
 	}
 	return f
