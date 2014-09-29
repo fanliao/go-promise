@@ -148,9 +148,9 @@ type futureVal struct {
 //Future provides a read-only view of promise, the value is set by using promise.Resolve, Reject and Cancel methods
 type Future struct {
 	oncePipe *sync.Once
-	lock     *sync.Mutex
-	chOut    chan *PromiseResult
-	chEnd    chan struct{}
+	//lock     *sync.Mutex
+	chOut chan *PromiseResult
+	chEnd chan struct{}
 	//dones, fails, always []func(v interface{})
 	//pipe
 	////r          *PromiseResult
@@ -687,7 +687,7 @@ func NewPromise() *Promise {
 	}
 	f := &Promise{new(sync.Once),
 		&Future{
-			new(sync.Once), new(sync.Mutex),
+			new(sync.Once), //new(sync.Mutex),
 			make(chan *PromiseResult, 1),
 			make(chan struct{}),
 			unsafe.Pointer(val),

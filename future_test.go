@@ -107,7 +107,7 @@ func TestGetOrTimeout(t *testing.T) {
 			p.Reject(errors.New("fail"))
 		}()
 		c.Convey("Should return error", func() {
-			r, err, timeout := p.GetOrTimeout(53)
+			r, err, timeout := p.GetOrTimeout(83)
 			c.So(timeout, c.ShouldBeFalse)
 			c.So(r, c.ShouldBeNil)
 			c.So(err, c.ShouldNotBeNil)
