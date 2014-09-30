@@ -72,7 +72,9 @@ func TestCancel(t *testing.T) {
 		c.Convey("Should return CancelledError", func() {
 			r, err := p.Get()
 			c.So(r, c.ShouldBeNil)
-			c.So(err, c.ShouldHaveSameTypeAs, &CancelledError{})
+			c.So(err, c.ShouldEqual, CANCELLED)
+			fmt.Println("p.cancel=", p.cancelStatus)
+			c.So(p.IsCancelled(), c.ShouldBeTrue)
 		})
 	})
 }
@@ -124,7 +126,8 @@ func TestGetOrTimeout(t *testing.T) {
 			r, err, timeout := p.GetOrTimeout(83)
 			c.So(timeout, c.ShouldBeFalse)
 			c.So(r, c.ShouldBeNil)
-			c.So(err, c.ShouldHaveSameTypeAs, &CancelledError{})
+			c.So(err, c.ShouldEqual, CANCELLED)
+			c.So(p.IsCancelled(), c.ShouldBeTrue)
 		})
 	})
 }
@@ -167,7 +170,8 @@ func TestGetChan(t *testing.T) {
 		}()
 		c.Convey("Should receive CancelledError from returned channel", func() {
 			fr, ok := <-p.GetChan()
-			c.So(fr.Result, c.ShouldHaveSameTypeAs, &CancelledError{})
+			c.So(fr.Result, c.ShouldEqual, CANCELLED)
+			c.So(p.IsCancelled(), c.ShouldBeTrue)
 			c.So(fr.Typ, c.ShouldEqual, RESULT_CANCELLED)
 			c.So(ok, c.ShouldBeTrue)
 		})
@@ -462,14 +466,15 @@ func TestStart(t *testing.T) {
 			f := Start(func(canceller Canceller) {
 				time.Sleep(10)
 				if canceller.IsCancellationRequested() {
-					canceller.SetCancelled()
+					canceller.Cancel()
 				}
 			})
 			f.RequestCancel()
 			r, err := f.Get()
 			c.So(f.IsCancelled(), c.ShouldBeTrue)
 			c.So(r, c.ShouldBeNil)
-			c.So(err, c.ShouldHaveSameTypeAs, &CancelledError{})
+			c.So(err, c.ShouldEqual, CANCELLED)
+			c.So(f.IsCancelled(), c.ShouldBeTrue)
 		})
 		c.Convey("When task panic error", func() {
 			f := Start(func(canceller Canceller) { panic("fail") })
@@ -500,7 +505,7 @@ func TestStart(t *testing.T) {
 				i := 0
 				for i < 50 {
 					if canceller.IsCancellationRequested() {
-						canceller.SetCancelled()
+						canceller.Cancel()
 						return nil, nil
 					}
 					time.Sleep(100 * time.Millisecond)
@@ -514,7 +519,8 @@ func TestStart(t *testing.T) {
 
 			c.So(f.IsCancelled(), c.ShouldBeTrue)
 			c.So(r, c.ShouldBeNil)
-			c.So(err, c.ShouldHaveSameTypeAs, &CancelledError{})
+			c.So(err, c.ShouldEqual, CANCELLED)
+			c.So(f.IsCancelled(), c.ShouldBeTrue)
 		})
 
 		c.Convey("When task panic error", func() {
@@ -656,7 +662,7 @@ func TestWhenAny(t *testing.T) {
 							time.Sleep((-1 * timeouts[i]) * time.Millisecond)
 						}
 						if canceller.IsCancellationRequested() {
-							canceller.SetCancelled()
+							canceller.Cancel()
 							if i == 0 {
 								c1 = true
 							} else {
@@ -710,7 +716,7 @@ func TestWhenAnyTrue(t *testing.T) {
 						time.Sleep((-1 * timeouts[i]) * time.Millisecond)
 					}
 					if canceller.IsCancellationRequested() {
-						canceller.SetCancelled()
+						canceller.Cancel()
 						if i == 0 {
 							c1 = true
 						} else {

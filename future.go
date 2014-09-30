@@ -67,12 +67,17 @@ type Promise struct {
 	*Future
 }
 
+var (
+	CANCELLED error = &CancelledError{}
+)
+
 //Cancel表示任务正常完成
 
 //Cancel method set the status of promise to cancelled
 //if promise is cancelled, Get() will return nil and CancelledError
 func (this *Promise) Cancel() (e error) {
-	return this.end(&PromiseResult{&CancelledError{}, RESULT_CANCELLED})
+	atomic.StoreInt32(&this.cancelStatus, 2)
+	return this.end(&PromiseResult{CANCELLED, RESULT_CANCELLED})
 }
 
 //Reslove表示任务正常完成
@@ -139,7 +144,7 @@ func (this *Promise) Always(callback func(v interface{})) *Promise {
 //Canceller used to check if the promise be requested to cancel, and set the cancelled status
 type Canceller interface {
 	IsCancellationRequested() bool
-	SetCancelled()
+	Cancel()
 }
 
 //保存Future状态数据的结构
@@ -183,10 +188,10 @@ func (this *Future) val() *futureVal {
 
 //Canceller provides a canceller related to future
 //if Canceller return nil, the futrue cannot be cancelled
-func (this *Future) Canceller() Canceller {
+func (this *Promise) Canceller() Canceller {
 	ccstatus := atomic.LoadInt32(&this.cancelStatus)
 	if ccstatus >= 0 {
-		return &canceller{&this.cancelStatus}
+		return &canceller{this}
 	} else {
 		return nil
 	}
@@ -212,28 +217,28 @@ func (this *Future) RequestCancel() bool {
 	//}
 }
 
-//判断任务是否已经被要求取消
+////判断任务是否已经被要求取消
 
-//IsCancellationRequested returns true if the promise is requested to cancelled,
-//otherwise false.
-func (this *Future) IsCancellationRequested() bool {
-	c := this.Canceller()
-	if c != nil {
-		return c.IsCancellationRequested()
-	} else {
-		return false
-	}
-}
+////IsCancellationRequested returns true if the promise is requested to cancelled,
+////otherwise false.
+//func (this *Future) IsCancellationRequested() bool {
+//	c := this.Canceller()
+//	if c != nil {
+//		return c.IsCancellationRequested()
+//	} else {
+//		return false
+//	}
+//}
 
-//设置任务为已被取消状态
+////设置任务为已被取消状态
 
-//SetCancelled set the status that presents the promise is cancelled,
-func (this *Future) SetCancelled() {
-	c := this.Canceller()
-	if c != nil && this.result() == nil {
-		c.SetCancelled()
-	}
-}
+////SetCancelled set the status that presents the promise is cancelled,
+//func (this *Future) SetCancelled() {
+//	c := this.Canceller()
+//	if c != nil && this.result() == nil {
+//		c.Cancel()
+//	}
+//}
 
 //获得任务是否已经被Cancel
 
@@ -383,28 +388,29 @@ func (this *Future) Pipe(callbacks ...(func(v interface{}) *Future)) (result *Fu
 }
 
 type canceller struct {
-	status *int32
+	p *Promise
 }
 
 //Cancel任务
 func (this *canceller) RequestCancel() {
 	//只有当状态==0（表示初始状态）时才可以请求取消任务
-	atomic.CompareAndSwapInt32(this.status, 0, 1)
+	atomic.CompareAndSwapInt32(&this.p.cancelStatus, 0, 1)
 }
 
 //已经被要求取消任务
 func (this *canceller) IsCancellationRequested() (r bool) {
-	return atomic.LoadInt32(this.status) == 1
+	return atomic.LoadInt32(&this.p.cancelStatus) == 1
 }
 
 //设置任务已经被Cancel
-func (this *canceller) SetCancelled() {
-	atomic.StoreInt32(this.status, 2)
+func (this *canceller) Cancel() {
+	//atomic.StoreInt32(&this.p.cancelStatus, 2)
+	this.p.Cancel()
 }
 
 //任务已经被Cancel
 func (this *canceller) IsCancelled() (r bool) {
-	return atomic.LoadInt32(this.status) == 2
+	return atomic.LoadInt32(&this.p.cancelStatus) == 2
 }
 
 //完成一个任务
@@ -794,9 +800,9 @@ func WhenAnyTrue(predicate func(interface{}) bool, fs ...*Future) *Future {
 					if predicate(r.result) {
 						//try to cancel other futures
 						for _, f := range fs {
-							if c := f.Canceller(); c != nil {
-								f.RequestCancel()
-							}
+							//if c := f.Canceller(); c != nil {
+							f.RequestCancel()
+							//}
 						}
 
 						//close the channel for avoid the send side be blocked
