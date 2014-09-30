@@ -99,13 +99,6 @@ func (this *Promise) Reject(err error) (e error) {
 //EnableCanceller set a Promise can be cancelled
 func (this *Promise) EnableCanceller() *Promise {
 	atomic.CompareAndSwapInt32(&this.cancelStatus, -1, 0)
-	//ccstatus := atomic.LoadInt32(&this.cancelStatus)
-	//if ccstatus >= 0 {
-	//	return &canceller{&this.cancelStatus}
-	//}
-	//if this.canceller == nil {
-	//	this.canceller = &canceller{}
-	//}
 	return this
 }
 
@@ -160,21 +153,14 @@ type futureVal struct {
 type Future struct {
 	Id       int
 	oncePipe *sync.Once
-	//lock     *sync.Mutex
-	chOut chan *PromiseResult
-	chEnd chan struct{}
-	//dones, fails, always []func(v interface{})
-	//pipe
-	////r          *PromiseResult
-	//r unsafe.Pointer
+	chOut    chan *PromiseResult
+	chEnd    chan struct{}
 	//指向futureVal的指针，程序要保证该指针指向的对象内容不会发送变化，任何变化都必须生成新对象并通过原子操作更新指针，以避免lock
-	v unsafe.Pointer
-	//*canceller //*PromiseCanceller
+	v            unsafe.Pointer
 	cancelStatus int32
 }
 
 func (this *Future) result() *PromiseResult {
-	//r := atomic.LoadPointer(&this.r)
 	val := this.val()
 	return (*PromiseResult)(val.r)
 }
@@ -209,36 +195,7 @@ func (this *Future) RequestCancel() bool {
 	} else {
 		return false
 	}
-	//if this.result() != nil || this.canceller == nil {
-	//	return false
-	//} else {
-	//	this.canceller.RequestCancel()
-	//	return true
-	//}
 }
-
-////判断任务是否已经被要求取消
-
-////IsCancellationRequested returns true if the promise is requested to cancelled,
-////otherwise false.
-//func (this *Future) IsCancellationRequested() bool {
-//	c := this.Canceller()
-//	if c != nil {
-//		return c.IsCancellationRequested()
-//	} else {
-//		return false
-//	}
-//}
-
-////设置任务为已被取消状态
-
-////SetCancelled set the status that presents the promise is cancelled,
-//func (this *Future) SetCancelled() {
-//	c := this.Canceller()
-//	if c != nil && this.result() == nil {
-//		c.Cancel()
-//	}
-//}
 
 //获得任务是否已经被Cancel
 
@@ -246,11 +203,6 @@ func (this *Future) RequestCancel() bool {
 func (this *Future) IsCancelled() bool {
 	ccstatus := atomic.LoadInt32(&this.cancelStatus)
 	return ccstatus == 2
-	//if this.canceller != nil {
-	//	return this.canceller.IsCancelled()
-	//} else {
-	//	return false
-	//}
 }
 
 func (this *Future) GetChan() chan *PromiseResult {
@@ -261,11 +213,7 @@ func (this *Future) GetChan() chan *PromiseResult {
 //如果任务已经完成，后续的Get将直接返回任务结果
 func (this *Future) Get() (interface{}, error) {
 	<-this.chEnd
-	//if fr, ok := <-this.chOut; ok {
-	//	return getFutureReturnVal(fr) //fr.Result, fr.Typ
-	//} else {
-	return getFutureReturnVal(this.result()) //r, typ
-	//}
+	return getFutureReturnVal(this.result())
 }
 
 //Get函数将一直阻塞直到任务完成或超过指定的Timeout时间
@@ -282,14 +230,8 @@ func (this *Future) GetOrTimeout(mm int) (interface{}, error, bool) {
 	case <-time.After((time.Duration)(mm) * time.Nanosecond):
 		return nil, nil, true
 	case <-this.chEnd:
-		//if ok {
-		//	r, err := getFutureReturnVal(fr)
-		//	return r, err, false
-		//} else {
 		r, err := getFutureReturnVal(this.result())
 		return r, err, false
-		//}
-
 	}
 }
 
@@ -363,26 +305,7 @@ func (this *Future) Pipe(callbacks ...(func(v interface{}) *Future)) (result *Fu
 				}
 			}
 		}
-		//r := this.result()
-		//if r != nil {
-		//	result = this
-		//	if r.Typ == RESULT_SUCCESS && callbacks[0] != nil {
-		//		result = (callbacks[0](r.Result))
-		//	} else if r.Typ != RESULT_FAILURE && len(callbacks) > 1 && callbacks[1] != nil {
-		//		result = (callbacks[1](r.Result))
-		//	}
-		//} else {
-		//	execWithLock(this.lock, func() {
-		//		this.pipeDoneTask = callbacks[0]
-		//		if len(callbacks) > 1 {
-		//			this.pipeFailTask = callbacks[1]
-		//		}
-		//		this.pipePromise = NewPromise()
-		//		result = this.pipePromise.Future
-		//	})
-		//}
 		ok = true
-		fmt.Println("return true")
 	})
 	return
 }
@@ -404,7 +327,6 @@ func (this *canceller) IsCancellationRequested() (r bool) {
 
 //设置任务已经被Cancel
 func (this *canceller) Cancel() {
-	//atomic.StoreInt32(&this.p.cancelStatus, 2)
 	this.p.Cancel()
 }
 
@@ -423,61 +345,33 @@ func (this *Promise) end(r *PromiseResult) (e error) { //r *PromiseResult) {
 	}()
 	e = errors.New("Cannot resolve/reject/cancel more than once")
 	this.onceEnd.Do(func() {
-		//fmt.Println("send future result", r)
 		for {
 			v := this.val()
 			newVal := *v
 			newVal.r = unsafe.Pointer(r)
 
 			if atomic.CompareAndSwapPointer(&this.v, unsafe.Pointer(v), unsafe.Pointer(&newVal)) {
-				//fmt.Println("send", r)
 				this.chOut <- r
 				//让Get函数可以返回
 				close(this.chEnd)
-				//fmt.Println("close done", r)
 
 				if r.Typ != RESULT_CANCELLED {
 					//任务完成后调用回调函数
 					execCallback(r, v.dones, v.fails, v.always)
 
-					//fmt.Println("after callback", r)
 					pipeTask, pipePromise := v.getPipe(r.Typ == RESULT_SUCCESS)
 					startPipe(r, pipeTask, pipePromise)
 				}
 				e = nil
 				break
 			}
-			//this.setResult(r)
-
-			////fmt.Println("send", r)
-			//this.chOut <- r
-			////让Get函数可以返回
-			//close(this.chEnd)
-			////fmt.Println("close done", r)
-
-			//if r.Typ != RESULT_CANCELLED {
-			//	//任务完成后调用回调函数
-			//	execCallback(r, this.dones, this.fails, this.always)
-
-			//	//fmt.Println("after callback", r)
-			//	pipeTask, pipePromise := this.getPipe(r.Typ == RESULT_SUCCESS)
-			//	this.startPipe(pipeTask, pipePromise)
-			//}
-			//e = nil
 		}
 	})
 	return
 }
 
-////set this.r
-//func (this *Promise) setResult(r *PromiseResult) {
-//	atomic.StorePointer(&this.r, unsafe.Pointer(r))
-//}
-
 //返回与链式调用相关的对象
 func (this *futureVal) getPipe(isResolved bool) (func(v interface{}) *Future, *Promise) {
-	//this.lock.Lock()
-	//defer this.lock.Unlock()
 	if isResolved {
 		return this.pipeDoneTask, this.pipePromise
 	} else {
@@ -487,7 +381,6 @@ func (this *futureVal) getPipe(isResolved bool) (func(v interface{}) *Future, *P
 
 func startPipe(r *PromiseResult, pipeTask func(v interface{}) *Future, pipePromise *Promise) {
 	//处理链式异步任务
-	//var f *Future
 	if pipeTask != nil {
 		f := pipeTask(r.Result)
 		f.Done(func(v interface{}) {
@@ -495,8 +388,6 @@ func startPipe(r *PromiseResult, pipeTask func(v interface{}) *Future, pipePromi
 		}).Fail(func(v interface{}) {
 			pipePromise.Reject(getError(v))
 		})
-		//} else {
-		//	f = this
 	}
 
 }
@@ -550,42 +441,7 @@ func (this *Future) handleOneCallback(callback func(v interface{}), t callbackTy
 			break
 		}
 	}
-	//pendingAction := func() {
-	//	switch t {
-	//	case CALLBACK_DONE:
-	//		this.dones = append(this.dones, callback)
-	//	case CALLBACK_FAIL:
-	//		this.fails = append(this.fails, callback)
-	//	case CALLBACK_ALWAYS:
-	//		this.always = append(this.always, callback)
-	//	}
-	//}
-	//finalAction := func(r *PromiseResult) {
-	//	if (t == CALLBACK_DONE && r.Typ == RESULT_SUCCESS) ||
-	//		(t == CALLBACK_FAIL && r.Typ == RESULT_FAILURE) ||
-	//		(t == CALLBACK_ALWAYS && r.Typ != RESULT_CANCELLED) {
-	//		callback(r.Result)
-	//	}
-	//}
-	//if f := this.addCallback(pendingAction, finalAction); f != nil {
-	//	f()
-	//}
 }
-
-////添加回调函数的框架函数
-//func (this *Future) addCallback(pendingAction func(), finalAction func(*PromiseResult)) (fun func()) {
-//	r := this.result()
-//	if r == nil {
-//		execWithLock(this.lock, func() {
-//			pendingAction()
-//		})
-//		fun = nil
-//	} else {
-//		fun = func() { finalAction(r) }
-//	}
-
-//	return
-//}
 
 //异步或同步执行一个函数。并以Future包装函数返回值返回
 func Start(act interface{}, syncs ...bool) *Future {
@@ -606,14 +462,11 @@ func Start(act interface{}, syncs ...bool) *Future {
 	if syncs != nil && len(syncs) > 0 && !syncs[0] {
 		r, err := action()
 		if pr.IsCancelled() {
-			//fmt.Println("cancel", r)
 			pr.Cancel()
 		} else {
 			if err == nil {
-				//fmt.Println("resolve", r, stack)
 				pr.Resolve(r)
 			} else {
-				//fmt.Println("reject1===", err, "\n")
 				pr.Reject(err)
 			}
 		}
@@ -621,14 +474,11 @@ func Start(act interface{}, syncs ...bool) *Future {
 		go func() {
 			r, err := action()
 			if pr.IsCancelled() {
-				//fmt.Println("cancel", r)
 				pr.Cancel()
 			} else {
 				if err == nil {
-					//fmt.Println("resolve", r, stack)
 					pr.Resolve(r)
 				} else {
-					//fmt.Println("reject1===", err, "\n")
 					pr.Reject(err)
 				}
 			}
@@ -664,8 +514,6 @@ func getAct(pr *Promise, act interface{}) (f func() (r interface{}, err error)) 
 			return nil, nil
 		}
 	default:
-		//r = v
-		//return
 	}
 
 	var canceller Canceller = nil
@@ -680,7 +528,6 @@ func getAct(pr *Promise, act interface{}) (f func() (r interface{}, err error)) 
 }
 
 func execute(canceller Canceller, act func() (interface{}, error), actCancel func(Canceller) (interface{}, error), canCancel bool) (r interface{}, err error) {
-
 	defer func() {
 		if e := recover(); e != nil {
 			err = newErrorWithStacks(e)
@@ -753,7 +600,6 @@ func WhenAnyTrue(predicate func(interface{}) bool, fs ...*Future) *Future {
 		for i, f := range fs {
 			k := i
 			f.Done(func(v interface{}) {
-				//nf.Resolve(v)
 				defer func() { _ = recover() }()
 				chDones <- anyPromiseResult{v, k}
 			}).Fail(func(v interface{}) {
@@ -763,13 +609,11 @@ func WhenAnyTrue(predicate func(interface{}) bool, fs ...*Future) *Future {
 		}
 	}()
 
-	//var result interface{}
 	if len(fs) == 0 {
 		nf.Resolve(nil)
 	} else if len(fs) == 1 {
 		select {
 		case r := <-chFails:
-			//fmt.Println("get err")
 			errs := make([]error, 1)
 			errs[0] = getError(r.result)
 			nf.Reject(newAggregateError("Error appears in WhenAnyTrue:", errs))
@@ -784,25 +628,20 @@ func WhenAnyTrue(predicate func(interface{}) bool, fs ...*Future) *Future {
 		go func() {
 			defer func() {
 				if e := recover(); e != nil {
-					//fmt.Println("reject2", newErrorWithStacks(e))
 					nf.Reject(newErrorWithStacks(e))
 				}
 			}()
+
 			j := 0
-			//fmt.Println("start for")
 			for {
 				select {
 				case r := <-chFails:
-					//fmt.Println("get err")
 					rs[r.i] = getError(r.result)
 				case r := <-chDones:
-					//fmt.Println("get return", r)
 					if predicate(r.result) {
 						//try to cancel other futures
 						for _, f := range fs {
-							//if c := f.Canceller(); c != nil {
 							f.RequestCancel()
-							//}
 						}
 
 						//close the channel for avoid the send side be blocked
@@ -822,7 +661,6 @@ func WhenAnyTrue(predicate func(interface{}) bool, fs ...*Future) *Future {
 				}
 
 				if j++; j == len(fs) {
-					//fmt.Println("receive all")
 					errs, k := make([]error, j), 0
 					for _, r := range rs {
 						switch val := r.(type) {
@@ -840,8 +678,6 @@ func WhenAnyTrue(predicate func(interface{}) bool, fs ...*Future) *Future {
 					break
 				}
 			}
-			//fmt.Println("exit start")
-
 		}()
 	}
 	return nf.Future
@@ -856,7 +692,6 @@ func WaitAll(acts ...interface{}) (fu *Future) {
 		return
 	}
 
-	//paralActs := acts[0 : len(acts)-1]
 	f1 := WhenAll(acts[0 : len(acts)-1]...)
 
 	p := NewPromise()
@@ -877,7 +712,6 @@ func WaitAll(acts ...interface{}) (fu *Future) {
 		rs = append(rs, r)
 		pr.Resolve(rs)
 	}
-	//}
 	return
 }
 
@@ -911,6 +745,7 @@ func WhenAllFuture(fs ...*Future) *Future {
 			isCancelled := int32(0)
 			for i, f := range fs {
 				j := i
+
 				f.Done(func(v interface{}) {
 					rs[j] = v
 					if atomic.AddInt32(&n, -1) == 0 {
@@ -928,7 +763,6 @@ func WhenAllFuture(fs ...*Future) *Future {
 						errs := make([]error, 0, 1)
 						errs = append(errs, v.(error))
 						e := newAggregateError("Error appears in WhenAll:", errs)
-						//fmt.Println("whenall reject2", e.Error())
 						wf.Reject(e)
 					}
 				})
@@ -937,12 +771,6 @@ func WhenAllFuture(fs ...*Future) *Future {
 	}
 
 	return wf.Future
-}
-
-func execWithLock(lock *sync.Mutex, act func()) {
-	lock.Lock()
-	defer lock.Unlock()
-	act()
 }
 
 func forSlice(s []func(v interface{}), f func(func(v interface{}))) {
