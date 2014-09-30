@@ -894,50 +894,43 @@ func WhenAll(acts ...interface{}) (fu *Future) {
 
 //产生一个新的Future，如果列表中所有Future都成功完成，则Promise成功完成，否则失败
 func WhenAllFuture(fs ...*Future) *Future {
-	f := NewPromise()
+	wf := NewPromise()
 	rs := make([]interface{}, len(fs))
-	errs := make([]error, 0, len(fs))
 
 	if len(fs) == 0 {
-		f.Resolve([]interface{}{})
+		wf.Resolve([]interface{}{})
 	} else {
+		n := int32(len(fs))
 		go func() {
-			allOk := true
-			cancelRequested := false
+			isCancelled := int32(0)
 			for i, f := range fs {
-				//if a future be failure, then will try to cancel other futures
-				if !allOk && !cancelRequested {
-					for j := i; j < len(fs); j++ {
-						if c := fs[j].Canceller(); c != nil {
-							fs[j].RequestCancel()
-						}
+				j := i
+				f.Done(func(v interface{}) {
+					rs[j] = v
+					if atomic.AddInt32(&n, -1) == 0 {
+						wf.Resolve(rs)
 					}
-					cancelRequested = true
-					//have capture the error in before Future, so will discards the other Future
-					break
-				}
-				r, err := f.Get()
-				if err != nil {
-					allOk = false
-					errs = append(errs, err)
-					break
-				}
-				rs[i] = r
+				}).Fail(func(v interface{}) {
+					if atomic.CompareAndSwapInt32(&isCancelled, 0, 1) {
+						//try to cancel all futures
+						for k, f1 := range fs {
+							if k != j {
+								f1.RequestCancel()
+							}
+						}
 
-			}
-
-			if allOk {
-				f.Resolve(rs)
-			} else {
-				//fmt.Println("whenall reject", errs)
-				e := newAggregateError("Error appears in WhenAll:", errs)
-				//fmt.Println("whenall reject2", e.Error())
-				f.Reject(e)
+						errs := make([]error, 0, 1)
+						errs = append(errs, v.(error))
+						e := newAggregateError("Error appears in WhenAll:", errs)
+						//fmt.Println("whenall reject2", e.Error())
+						wf.Reject(e)
+					}
+				})
 			}
 		}()
 	}
 
-	return f.Future
+	return wf.Future
 }
 
 func execWithLock(lock *sync.Mutex, act func()) {

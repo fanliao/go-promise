@@ -121,7 +121,7 @@ func TestGetOrTimeout(t *testing.T) {
 			p.Cancel()
 		}()
 		c.Convey("Should return CancelledError", func() {
-			r, err, timeout := p.GetOrTimeout(53)
+			r, err, timeout := p.GetOrTimeout(83)
 			c.So(timeout, c.ShouldBeFalse)
 			c.So(r, c.ShouldBeNil)
 			c.So(err, c.ShouldHaveSameTypeAs, &CancelledError{})
@@ -814,8 +814,8 @@ func TestWhenAll(t *testing.T) {
 		})
 
 		c.Convey("When all tasks failed", func() {
-			r, err := whenTwoTask(-250, -210).Get()
-			c.So(err.(*AggregateError).InnerErrs[0].(*myError).val, c.ShouldEqual, "fail0")
+			r, err := whenTwoTask(-250, -110).Get()
+			c.So(err.(*AggregateError).InnerErrs[0].(*myError).val, c.ShouldEqual, "fail1")
 			c.So(r, c.ShouldBeNil)
 		})
 
