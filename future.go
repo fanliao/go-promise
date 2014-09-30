@@ -41,6 +41,10 @@ const (
 	RESULT_CANCELLED
 )
 
+var (
+	CANCELLED error = &CancelledError{}
+)
+
 //代表异步任务的结果
 
 //PromiseResult presents the result of a promise
@@ -66,10 +70,6 @@ type Promise struct {
 	onceEnd *sync.Once
 	*Future
 }
-
-var (
-	CANCELLED error = &CancelledError{}
-)
 
 //Cancel表示任务正常完成
 
@@ -102,6 +102,19 @@ func (this *Promise) EnableCanceller() *Promise {
 	return this
 }
 
+//获取Canceller接口，在异步任务内可以通过此对象查询任务是否已经被取消
+
+//Canceller provides a canceller related to future
+//if Canceller return nil, the futrue cannot be cancelled
+func (this *Promise) Canceller() Canceller {
+	ccstatus := atomic.LoadInt32(&this.cancelStatus)
+	if ccstatus >= 0 {
+		return &canceller{this}
+	} else {
+		return nil
+	}
+}
+
 //添加一个任务成功完成时的回调，如果任务已经成功完成，则直接执行回调函数
 //传递给Done函数的参数与Reslove函数的参数相同
 
@@ -132,6 +145,41 @@ func (this *Promise) Always(callback func(v interface{})) *Promise {
 	return this
 }
 
+//完成一个任务
+func (this *Promise) end(r *PromiseResult) (e error) { //r *PromiseResult) {
+	defer func() {
+		if err := getError(recover()); err != nil {
+			e = err
+			fmt.Println("\nerror in end():", err)
+		}
+	}()
+	e = errors.New("Cannot resolve/reject/cancel more than once")
+	this.onceEnd.Do(func() {
+		for {
+			v := this.val()
+			newVal := *v
+			newVal.r = unsafe.Pointer(r)
+
+			if atomic.CompareAndSwapPointer(&this.v, unsafe.Pointer(v), unsafe.Pointer(&newVal)) {
+				this.chOut <- r
+				//让Get函数可以返回
+				close(this.chEnd)
+
+				if r.Typ != RESULT_CANCELLED {
+					//任务完成后调用回调函数
+					execCallback(r, v.dones, v.fails, v.always)
+
+					pipeTask, pipePromise := v.getPipe(r.Typ == RESULT_SUCCESS)
+					startPipe(r, pipeTask, pipePromise)
+				}
+				e = nil
+				break
+			}
+		}
+	})
+	return
+}
+
 //Cancel一个任务的interface
 
 //Canceller used to check if the promise be requested to cancel, and set the cancelled status
@@ -140,11 +188,45 @@ type Canceller interface {
 	Cancel()
 }
 
+type canceller struct {
+	p *Promise
+}
+
+//Cancel任务
+func (this *canceller) RequestCancel() {
+	//只有当状态==0（表示初始状态）时才可以请求取消任务
+	atomic.CompareAndSwapInt32(&this.p.cancelStatus, 0, 1)
+}
+
+//已经被要求取消任务
+func (this *canceller) IsCancellationRequested() (r bool) {
+	return atomic.LoadInt32(&this.p.cancelStatus) == 1
+}
+
+//设置任务已经被Cancel
+func (this *canceller) Cancel() {
+	this.p.Cancel()
+}
+
+//任务已经被Cancel
+func (this *canceller) IsCancelled() (r bool) {
+	return atomic.LoadInt32(&this.p.cancelStatus) == 2
+}
+
 //保存Future状态数据的结构
 type futureVal struct {
 	dones, fails, always []func(v interface{})
 	pipe
 	r unsafe.Pointer
+}
+
+//返回与链式调用相关的对象
+func (this *futureVal) getPipe(isResolved bool) (func(v interface{}) *Future, *Promise) {
+	if isResolved {
+		return this.pipeDoneTask, this.pipePromise
+	} else {
+		return this.pipeFailTask, this.pipePromise
+	}
 }
 
 //Future代表一个异步任务的readonly-view
@@ -158,29 +240,6 @@ type Future struct {
 	//指向futureVal的指针，程序要保证该指针指向的对象内容不会发送变化，任何变化都必须生成新对象并通过原子操作更新指针，以避免lock
 	v            unsafe.Pointer
 	cancelStatus int32
-}
-
-func (this *Future) result() *PromiseResult {
-	val := this.val()
-	return (*PromiseResult)(val.r)
-}
-
-func (this *Future) val() *futureVal {
-	r := atomic.LoadPointer(&this.v)
-	return (*futureVal)(r)
-}
-
-//获取Canceller接口，在异步任务内可以通过此对象查询任务是否已经被取消
-
-//Canceller provides a canceller related to future
-//if Canceller return nil, the futrue cannot be cancelled
-func (this *Promise) Canceller() Canceller {
-	ccstatus := atomic.LoadInt32(&this.cancelStatus)
-	if ccstatus >= 0 {
-		return &canceller{this}
-	} else {
-		return nil
-	}
 }
 
 //请求取消异步任务
@@ -232,16 +291,6 @@ func (this *Future) GetOrTimeout(mm int) (interface{}, error, bool) {
 	case <-this.chEnd:
 		r, err := getFutureReturnVal(this.result())
 		return r, err, false
-	}
-}
-
-func getFutureReturnVal(r *PromiseResult) (interface{}, error) {
-	if r.Typ == RESULT_SUCCESS {
-		return r.Result, nil
-	} else if r.Typ == RESULT_FAILURE {
-		return nil, getError(r.Result)
-	} else {
-		return nil, getError(r.Result) //&CancelledError{}
 	}
 }
 
@@ -310,104 +359,14 @@ func (this *Future) Pipe(callbacks ...(func(v interface{}) *Future)) (result *Fu
 	return
 }
 
-type canceller struct {
-	p *Promise
+func (this *Future) result() *PromiseResult {
+	val := this.val()
+	return (*PromiseResult)(val.r)
 }
 
-//Cancel任务
-func (this *canceller) RequestCancel() {
-	//只有当状态==0（表示初始状态）时才可以请求取消任务
-	atomic.CompareAndSwapInt32(&this.p.cancelStatus, 0, 1)
-}
-
-//已经被要求取消任务
-func (this *canceller) IsCancellationRequested() (r bool) {
-	return atomic.LoadInt32(&this.p.cancelStatus) == 1
-}
-
-//设置任务已经被Cancel
-func (this *canceller) Cancel() {
-	this.p.Cancel()
-}
-
-//任务已经被Cancel
-func (this *canceller) IsCancelled() (r bool) {
-	return atomic.LoadInt32(&this.p.cancelStatus) == 2
-}
-
-//完成一个任务
-func (this *Promise) end(r *PromiseResult) (e error) { //r *PromiseResult) {
-	defer func() {
-		if err := getError(recover()); err != nil {
-			e = err
-			fmt.Println("\nerror in end():", err)
-		}
-	}()
-	e = errors.New("Cannot resolve/reject/cancel more than once")
-	this.onceEnd.Do(func() {
-		for {
-			v := this.val()
-			newVal := *v
-			newVal.r = unsafe.Pointer(r)
-
-			if atomic.CompareAndSwapPointer(&this.v, unsafe.Pointer(v), unsafe.Pointer(&newVal)) {
-				this.chOut <- r
-				//让Get函数可以返回
-				close(this.chEnd)
-
-				if r.Typ != RESULT_CANCELLED {
-					//任务完成后调用回调函数
-					execCallback(r, v.dones, v.fails, v.always)
-
-					pipeTask, pipePromise := v.getPipe(r.Typ == RESULT_SUCCESS)
-					startPipe(r, pipeTask, pipePromise)
-				}
-				e = nil
-				break
-			}
-		}
-	})
-	return
-}
-
-//返回与链式调用相关的对象
-func (this *futureVal) getPipe(isResolved bool) (func(v interface{}) *Future, *Promise) {
-	if isResolved {
-		return this.pipeDoneTask, this.pipePromise
-	} else {
-		return this.pipeFailTask, this.pipePromise
-	}
-}
-
-func startPipe(r *PromiseResult, pipeTask func(v interface{}) *Future, pipePromise *Promise) {
-	//处理链式异步任务
-	if pipeTask != nil {
-		f := pipeTask(r.Result)
-		f.Done(func(v interface{}) {
-			pipePromise.Resolve(v)
-		}).Fail(func(v interface{}) {
-			pipePromise.Reject(getError(v))
-		})
-	}
-
-}
-
-//执行回调函数
-func execCallback(r *PromiseResult, dones []func(v interface{}), fails []func(v interface{}), always []func(v interface{})) {
-	var callbacks []func(v interface{})
-	if r.Typ == RESULT_SUCCESS {
-		callbacks = dones
-	} else {
-		callbacks = fails
-	}
-
-	forFs := func(s []func(v interface{})) {
-		forSlice(s, func(f func(v interface{})) { f(r.Result) })
-	}
-
-	forFs(callbacks)
-	forFs(always)
-
+func (this *Future) val() *futureVal {
+	r := atomic.LoadPointer(&this.v)
+	return (*futureVal)(r)
 }
 
 //处理单个回调函数的添加请求
@@ -771,6 +730,47 @@ func WhenAllFuture(fs ...*Future) *Future {
 	}
 
 	return wf.Future
+}
+
+func startPipe(r *PromiseResult, pipeTask func(v interface{}) *Future, pipePromise *Promise) {
+	//处理链式异步任务
+	if pipeTask != nil {
+		f := pipeTask(r.Result)
+		f.Done(func(v interface{}) {
+			pipePromise.Resolve(v)
+		}).Fail(func(v interface{}) {
+			pipePromise.Reject(getError(v))
+		})
+	}
+
+}
+
+func getFutureReturnVal(r *PromiseResult) (interface{}, error) {
+	if r.Typ == RESULT_SUCCESS {
+		return r.Result, nil
+	} else if r.Typ == RESULT_FAILURE {
+		return nil, getError(r.Result)
+	} else {
+		return nil, getError(r.Result) //&CancelledError{}
+	}
+}
+
+//执行回调函数
+func execCallback(r *PromiseResult, dones []func(v interface{}), fails []func(v interface{}), always []func(v interface{})) {
+	var callbacks []func(v interface{})
+	if r.Typ == RESULT_SUCCESS {
+		callbacks = dones
+	} else {
+		callbacks = fails
+	}
+
+	forFs := func(s []func(v interface{})) {
+		forSlice(s, func(f func(v interface{})) { f(r.Result) })
+	}
+
+	forFs(callbacks)
+	forFs(always)
+
 }
 
 func forSlice(s []func(v interface{}), f func(func(v interface{}))) {
