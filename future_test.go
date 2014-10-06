@@ -766,8 +766,8 @@ func TestWhenAnyTrue(t *testing.T) {
 		r, err := startTwoCanCancelTask(30, 250, func(v interface{}) bool {
 			return v.(string) == "ok11"
 		}).Get()
-		c.So(r, c.ShouldEqual, false)
-		c.So(err, c.ShouldBeNil)
+		c.So(r, c.ShouldBeNil)
+		c.So(err, c.ShouldNotBeNil)
 		time.Sleep(1000 * time.Millisecond)
 		c.So(c1, c.ShouldEqual, false)
 		c.So(c2, c.ShouldEqual, false)

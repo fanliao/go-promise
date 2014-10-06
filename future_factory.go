@@ -9,23 +9,17 @@ type anyPromiseResult struct {
 	i      int
 }
 
-//异步或同步执行一个函数。并以Future包装函数返回值返回
+//Start calls act function and return a Future that presents the result.
+//If option paramter is true, the act function will be sync called.
 func Start(act interface{}, syncs ...bool) *Future {
 	pr := NewPromise()
 	if f, ok := act.(*Future); ok {
 		return f
 	}
-	switch v := act.(type) {
-	case func(Canceller) (interface{}, error):
-		pr.EnableCanceller()
-		_ = v
-	case func(Canceller):
-		pr.EnableCanceller()
-		_ = v
-	}
 
 	action := getAct(pr, act)
 	if syncs != nil && len(syncs) > 0 && !syncs[0] {
+		//sync call
 		r, err := action()
 		if pr.IsCancelled() {
 			pr.Cancel()
@@ -37,6 +31,7 @@ func Start(act interface{}, syncs ...bool) *Future {
 			}
 		}
 	} else {
+		//async call
 		go func() {
 			r, err := action()
 			if pr.IsCancelled() {
@@ -54,6 +49,7 @@ func Start(act interface{}, syncs ...bool) *Future {
 	return pr.Future
 }
 
+//Wrap return a Future that presents the wrapped value
 func Wrap(value interface{}) *Future {
 	pr := NewPromise()
 	if e, ok := value.(error); !ok {
@@ -65,14 +61,16 @@ func Wrap(value interface{}) *Future {
 	return pr.Future
 }
 
-//产生一个新的Promise，如果列表中任意1个Promise完成，则Promise完成, 否则将触发Reject，参数为包含所有Promise的Reject返回值的slice
+//WhenAny returns a Future.
+//If any Future is resolved, this Future will be resolved and return result of resolved Future.
+//Otherwise will rejected with results slice returned by all Futures
 func WhenAny(fs ...*Future) *Future {
 	return WhenAnyTrue(nil, fs...)
 }
 
-//产生一个新的Promise，如果列表中任意1个Promise完成并且返回值符合条件，则Promise完成并返回true
-//如果所有Promise完成并且返回值都不符合条件，则Promise完成并返回false,
-//否则将触发Reject，参数为包含所有Promise的Reject返回值的slice
+//WhenAnyTrue returns a Future.
+//If any Future is resolved and match the predicate, this Future will be resolved and return result of resolved Future.
+//Otherwise will rejected with a AggregateError included results slice returned by all Futures
 func WhenAnyTrue(predicate func(interface{}) bool, fs ...*Future) *Future {
 	if predicate == nil {
 		predicate = func(v interface{}) bool { return true }
@@ -106,7 +104,9 @@ func WhenAnyTrue(predicate func(interface{}) bool, fs ...*Future) *Future {
 			if predicate(r.result) {
 				nf.Resolve(r.result)
 			} else {
-				nf.Resolve(false)
+				errs := make([]error, 1)
+				errs[0] = getError(r.result)
+				nf.Reject(newAggregateError("No matched in WhenAnyTrue:", errs))
 			}
 		}
 	} else {
@@ -158,7 +158,12 @@ func WhenAnyTrue(predicate func(interface{}) bool, fs ...*Future) *Future {
 					if k > 0 {
 						nf.Reject(newAggregateError("Error appears in WhenAnyTrue:", errs[0:j]))
 					} else {
-						nf.Resolve(false)
+						errs := make([]error, len(rs))
+						for i, r := range rs {
+							errs[i] = getError(r)
+						}
+						nf.Reject(newAggregateError("No matched in WhenAnyTrue:", errs))
+						//nf.Reject(rs)
 					}
 					break
 				}
@@ -168,6 +173,9 @@ func WhenAnyTrue(predicate func(interface{}) bool, fs ...*Future) *Future {
 	return nf.Future
 }
 
+//WaitAll returns a Future.
+//If any Future is resolved and match the predicate, this Future will be resolved and return result of resolved Future.
+//Otherwise will rejected with results slice returned by all Futures
 func WaitAll(acts ...interface{}) (fu *Future) {
 	pr := NewPromise()
 	fu = pr.Future
@@ -200,6 +208,9 @@ func WaitAll(acts ...interface{}) (fu *Future) {
 	return
 }
 
+//WhenAll receives function slice and returns a Future.
+//If all Futures are resolved, this Future will be resolved and return results slice.
+//Otherwise will rejected with results slice returned by all Futures
 func WhenAll(acts ...interface{}) (fu *Future) {
 	pr := NewPromise()
 	fu = pr.Future
@@ -217,7 +228,9 @@ func WhenAll(acts ...interface{}) (fu *Future) {
 	return
 }
 
-//产生一个新的Future，如果列表中所有Future都成功完成，则Promise成功完成，否则失败
+//WhenAll receives Futures slice and returns a Future.
+//If all Futures are resolved, this Future will be resolved and return results slice.
+//Otherwise will rejected with results slice returned by all Futures
 func WhenAllFuture(fs ...*Future) *Future {
 	wf := NewPromise()
 	rs := make([]interface{}, len(fs))

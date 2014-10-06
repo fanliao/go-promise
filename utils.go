@@ -8,7 +8,6 @@ import (
 	"strconv"
 )
 
-//执行一个函数或直接返回一个值，如果是可Cancel的函数，需要传递canceller对象
 func getAct(pr *Promise, act interface{}) (f func() (r interface{}, err error)) {
 	var (
 		act1 func() (interface{}, error)
@@ -16,6 +15,7 @@ func getAct(pr *Promise, act interface{}) (f func() (r interface{}, err error)) 
 	)
 	canCancel := false
 
+	//convert the act to the function that has return value and error if act function haven't return value and error
 	switch v := act.(type) {
 	case func() (interface{}, error):
 		act1 = v
@@ -36,30 +36,28 @@ func getAct(pr *Promise, act interface{}) (f func() (r interface{}, err error)) 
 	default:
 	}
 
+	//If paramters of act function has a Canceller interface, the Future will can be cancelled.
 	var canceller Canceller = nil
 	if pr != nil && canCancel {
 		pr.EnableCanceller()
 		canceller = pr.Canceller()
 	}
+	//return proxy function of act function
 	f = func() (r interface{}, err error) {
-		return execute(canceller, act1, act2, canCancel)
-	}
-	return
-}
+		defer func() {
+			if e := recover(); e != nil {
+				err = newErrorWithStacks(e)
+			}
+		}()
 
-func execute(canceller Canceller, act func() (interface{}, error), actCancel func(Canceller) (interface{}, error), canCancel bool) (r interface{}, err error) {
-	defer func() {
-		if e := recover(); e != nil {
-			err = newErrorWithStacks(e)
+		if canCancel {
+			r, err = act2(canceller)
+		} else {
+			r, err = act1()
 		}
-	}()
 
-	if canCancel {
-		r, err = actCancel(canceller)
-	} else {
-		r, err = act()
+		return
 	}
-
 	return
 }
 
