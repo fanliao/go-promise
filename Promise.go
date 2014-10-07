@@ -142,9 +142,10 @@ func (this *Promise) end(r *PromiseResult) (e error) { //r *PromiseResult) {
 				//if this Promise is resolved or rejected
 				if r.Typ != RESULT_CANCELLED {
 					execCallback(r, v.dones, v.fails, v.always)
-
-					pipeTask, pipePromise := v.getPipe(r.Typ == RESULT_SUCCESS)
-					startPipe(r, pipeTask, pipePromise)
+					for _, pipe := range v.pipes {
+						pipeTask, pipePromise := pipe.getPipe(r.Typ == RESULT_SUCCESS)
+						startPipe(r, pipeTask, pipePromise)
+					}
 				}
 				e = nil
 				break
@@ -198,12 +199,11 @@ func NewPromise() *Promise {
 		make([]func(v interface{}), 0, 8),
 		make([]func(v interface{}), 0, 8),
 		make([]func(v interface{}), 0, 4),
-		pipe{}, nil,
+		make([]*pipe, 0, 4), nil,
 	}
 	f := &Promise{new(sync.Once),
 		&Future{
 			rand.Int(),
-			new(sync.Once), //new(sync.Mutex),
 			make(chan *PromiseResult, 1),
 			make(chan struct{}),
 			unsafe.Pointer(val),

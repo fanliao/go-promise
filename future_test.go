@@ -535,7 +535,7 @@ func TestStart(t *testing.T) {
 
 }
 
-func TestPipeWhenDone(t *testing.T) {
+func TestPipe(t *testing.T) {
 	timout := 50 * time.Millisecond
 	taskDonePipe := func(v interface{}) *Future {
 		return Start(func() (interface{}, error) {
@@ -584,13 +584,24 @@ func TestPipeWhenDone(t *testing.T) {
 
 	c.Convey("Test pipe twice", t, func() {
 		p := NewPromise()
-		_, ok1 := p.Pipe(taskDonePipe, taskFailPipe)
-		c.Convey("Calling Pipe can succeed at first time", func() {
+		pipeFuture1, ok1 := p.Pipe(taskDonePipe, taskFailPipe)
+		c.Convey("Calling Pipe succeed at first time", func() {
 			c.So(ok1, c.ShouldEqual, true)
 		})
-		_, ok2 := p.Pipe(taskDonePipe, taskFailPipe)
-		c.Convey("Only can call Pipe once, calling Pipe always failed at second time", func() {
-			c.So(ok2, c.ShouldEqual, false)
+		pipeFuture2, ok2 := p.Pipe(taskDonePipe, taskFailPipe)
+		c.Convey("Calling Pipe succeed at second time", func() {
+			c.So(ok2, c.ShouldEqual, true)
+		})
+		p.Resolve("ok")
+
+		r, _ := pipeFuture1.Get()
+		c.Convey("Pipeline future 1 should return ok2", func() {
+			c.So(r, c.ShouldEqual, "ok2")
+		})
+
+		r2, _ := pipeFuture2.Get()
+		c.Convey("Pipeline future 2 should return ok2", func() {
+			c.So(r2, c.ShouldEqual, "ok2")
 		})
 	})
 }

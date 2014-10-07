@@ -14,7 +14,6 @@ package promise
 
 import (
 	"fmt"
-	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -34,16 +33,8 @@ type pipe struct {
 	pipePromise                *Promise
 }
 
-//
-//futureVal stores the internal state of Future.
-type futureVal struct {
-	dones, fails, always []func(v interface{})
-	pipe
-	r unsafe.Pointer
-}
-
 //getPipe returns piped Future task function and pipe Promise by the status of current Promise.
-func (this *futureVal) getPipe(isResolved bool) (func(v interface{}) *Future, *Promise) {
+func (this *pipe) getPipe(isResolved bool) (func(v interface{}) *Future, *Promise) {
 	if isResolved {
 		return this.pipeDoneTask, this.pipePromise
 	} else {
@@ -51,13 +42,19 @@ func (this *futureVal) getPipe(isResolved bool) (func(v interface{}) *Future, *P
 	}
 }
 
+//futureVal stores the internal state of Future.
+type futureVal struct {
+	dones, fails, always []func(v interface{})
+	pipes                []*pipe
+	r                    unsafe.Pointer
+}
+
 //Future provides a read-only view of promise,
 //the value is set by using Resolve, Reject and Cancel methods of related Promise
 type Future struct {
-	Id       int //Id can be used as identity of Future
-	oncePipe *sync.Once
-	chOut    chan *PromiseResult
-	chEnd    chan struct{}
+	Id    int //Id can be used as identity of Future
+	chOut chan *PromiseResult
+	chEnd chan struct{}
 	//指向futureVal的指针，程序要保证该指针指向的对象内容不会发送变化，任何变化都必须生成新对象并通过原子操作更新指针，以避免lock
 	v            unsafe.Pointer
 	cancelStatus int32
@@ -140,7 +137,7 @@ func (this *Future) Always(callback func(v interface{})) *Future {
 	return this
 }
 
-//Pipe registers one or two functions that return a Future, and returns a proxy of pipeline Future.
+//Pipe registers one or two functions that returns a Future, and returns a proxy of pipeline Future.
 //First function will be called when Future is resolved, the returned Future will be as pipeline Future.
 //Secondary function will be called when Futrue is rejected, the returned Future will be as pipeline Future.
 func (this *Future) Pipe(callbacks ...(func(v interface{}) *Future)) (result *Future, ok bool) {
@@ -152,33 +149,36 @@ func (this *Future) Pipe(callbacks ...(func(v interface{}) *Future)) (result *Fu
 		return
 	}
 
-	this.oncePipe.Do(func() {
-		for {
-			v := this.val()
-			r := (*PromiseResult)(v.r)
-			if r != nil {
-				result = this
-				if r.Typ == RESULT_SUCCESS && callbacks[0] != nil {
-					result = (callbacks[0](r.Result))
-				} else if r.Typ == RESULT_FAILURE && len(callbacks) > 1 && callbacks[1] != nil {
-					result = (callbacks[1](r.Result))
-				}
-			} else {
-				newVal := *v
-				newVal.pipeDoneTask = callbacks[0]
-				if len(callbacks) > 1 {
-					newVal.pipeFailTask = callbacks[1]
-				}
-				newVal.pipePromise = NewPromise()
-				//通过CAS操作检测Future对象的原始状态未发生改变，否则需要重试
-				if atomic.CompareAndSwapPointer(&this.v, unsafe.Pointer(v), unsafe.Pointer(&newVal)) {
-					result = newVal.pipePromise.Future
-					break
-				}
+	//this.oncePipe.Do(func() {
+	for {
+		v := this.val()
+		r := (*PromiseResult)(v.r)
+		if r != nil {
+			result = this
+			if r.Typ == RESULT_SUCCESS && callbacks[0] != nil {
+				result = (callbacks[0](r.Result))
+			} else if r.Typ == RESULT_FAILURE && len(callbacks) > 1 && callbacks[1] != nil {
+				result = (callbacks[1](r.Result))
+			}
+		} else {
+			newPipe := &pipe{}
+			newPipe.pipeDoneTask = callbacks[0]
+			if len(callbacks) > 1 {
+				newPipe.pipeFailTask = callbacks[1]
+			}
+			newPipe.pipePromise = NewPromise()
+
+			newVal := *v
+			newVal.pipes = append(newVal.pipes, newPipe)
+			//通过CAS操作检测Future对象的原始状态未发生改变，否则需要重试
+			if atomic.CompareAndSwapPointer(&this.v, unsafe.Pointer(v), unsafe.Pointer(&newVal)) {
+				result = newPipe.pipePromise.Future
+				break
 			}
 		}
-		ok = true
-	})
+	}
+	ok = true
+	//})
 	return
 }
 
