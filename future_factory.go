@@ -65,13 +65,13 @@ func Wrap(value interface{}) *Future {
 //If any Future is resolved, this Future will be resolved and return result of resolved Future.
 //Otherwise will rejected with results slice returned by all Futures
 func WhenAny(fs ...*Future) *Future {
-	return WhenAnyTrue(nil, fs...)
+	return WhenAnyMatched(nil, fs...)
 }
 
-//WhenAnyTrue returns a Future.
+//WhenAnyMatched returns a Future.
 //If any Future is resolved and match the predicate, this Future will be resolved and return result of resolved Future.
 //Otherwise will rejected with a AggregateError included results slice returned by all Futures
-func WhenAnyTrue(predicate func(interface{}) bool, fs ...*Future) *Future {
+func WhenAnyMatched(predicate func(interface{}) bool, fs ...*Future) *Future {
 	if predicate == nil {
 		predicate = func(v interface{}) bool { return true }
 	}
@@ -104,9 +104,7 @@ func WhenAnyTrue(predicate func(interface{}) bool, fs ...*Future) *Future {
 			if predicate(r.result) {
 				nf.Resolve(r.result)
 			} else {
-				errs := make([]error, 1)
-				errs[0] = getError(r.result)
-				nf.Reject(newAggregateError("No matched in WhenAnyTrue:", errs))
+				nf.Reject(&NoMatchedError{})
 			}
 		}
 	} else {
@@ -158,12 +156,7 @@ func WhenAnyTrue(predicate func(interface{}) bool, fs ...*Future) *Future {
 					if k > 0 {
 						nf.Reject(newAggregateError("Error appears in WhenAnyTrue:", errs[0:j]))
 					} else {
-						errs := make([]error, len(rs))
-						for i, r := range rs {
-							errs[i] = getError(r)
-						}
-						nf.Reject(newAggregateError("No matched in WhenAnyTrue:", errs))
-						//nf.Reject(rs)
+						nf.Reject(&NoMatchedError{})
 					}
 					break
 				}

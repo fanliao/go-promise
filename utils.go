@@ -8,6 +8,62 @@ import (
 	"strconv"
 )
 
+//NoMatchedError presents no future that returns matched result in WhenAnyTrue function.
+type NoMatchedError struct {
+}
+
+func (e *NoMatchedError) Error() string {
+	return "No matched future"
+}
+
+//AggregateError aggregate multi errors into an error
+type AggregateError struct {
+	s         string
+	InnerErrs []error
+}
+
+func (e *AggregateError) Error() string {
+	if e.InnerErrs == nil {
+		return e.s
+	} else {
+		buf := bytes.NewBufferString(e.s)
+		buf.WriteString("\n\n")
+		for i, ie := range e.InnerErrs {
+			if ie == nil {
+				continue
+			}
+			buf.WriteString("error appears in Future ")
+			buf.WriteString(strconv.Itoa(i))
+			buf.WriteString(": ")
+			buf.WriteString(ie.Error())
+			buf.WriteString("\n")
+		}
+		buf.WriteString("\n")
+		return buf.String()
+	}
+}
+
+func newAggregateError(s string, innerErrors []error) *AggregateError {
+	return &AggregateError{newErrorWithStacks(s).Error(), innerErrors}
+}
+
+func newErrorWithStacks(i interface{}) (e error) {
+	err := getError(i)
+	buf := bytes.NewBufferString(err.Error())
+	buf.WriteString("\n")
+
+	pcs := make([]uintptr, 50)
+	num := runtime.Callers(2, pcs)
+	for _, v := range pcs[0:num] {
+		fun := runtime.FuncForPC(v)
+		file, line := fun.FileLine(v)
+		name := fun.Name()
+		//fmt.Println(name, file + ":", line)
+		writeStrings(buf, []string{name, " ", file, ":", strconv.Itoa(line), "\n"})
+	}
+	return errors.New(buf.String())
+}
+
 func getAct(pr *Promise, act interface{}) (f func() (r interface{}, err error)) {
 	var (
 		act1 func() (interface{}, error)
@@ -129,53 +185,6 @@ func getError(i interface{}) (e error) {
 		}
 	}
 	return
-}
-
-type AggregateError struct {
-	s         string
-	InnerErrs []error
-}
-
-func (e *AggregateError) Error() string {
-	if e.InnerErrs == nil {
-		return e.s
-	} else {
-		buf := bytes.NewBufferString(e.s)
-		buf.WriteString("\n\n")
-		for i, ie := range e.InnerErrs {
-			if ie == nil {
-				continue
-			}
-			buf.WriteString("error appears in Future ")
-			buf.WriteString(strconv.Itoa(i))
-			buf.WriteString(": ")
-			buf.WriteString(ie.Error())
-			buf.WriteString("\n")
-		}
-		buf.WriteString("\n")
-		return buf.String()
-	}
-}
-
-func newAggregateError(s string, innerErrors []error) *AggregateError {
-	return &AggregateError{newErrorWithStacks(s).Error(), innerErrors}
-}
-
-func newErrorWithStacks(i interface{}) (e error) {
-	err := getError(i)
-	buf := bytes.NewBufferString(err.Error())
-	buf.WriteString("\n")
-
-	pcs := make([]uintptr, 50)
-	num := runtime.Callers(2, pcs)
-	for _, v := range pcs[0:num] {
-		fun := runtime.FuncForPC(v)
-		file, line := fun.FileLine(v)
-		name := fun.Name()
-		//fmt.Println(name, file + ":", line)
-		writeStrings(buf, []string{name, " ", file, ":", strconv.Itoa(line), "\n"})
-	}
-	return errors.New(buf.String())
 }
 
 func writeStrings(buf *bytes.Buffer, strings []string) {

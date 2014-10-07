@@ -745,7 +745,7 @@ func TestWhenAnyTrue(t *testing.T) {
 		}
 		task0 := getTask(0)
 		task1 := getTask(1)
-		f := WhenAnyTrue(predicate, Start(task0), Start(task1))
+		f := WhenAnyMatched(predicate, Start(task0), Start(task1))
 		return f
 	}
 	//第一个任务先完成，第二个后完成，并且设定条件为返回值==第一个的返回值
@@ -777,8 +777,12 @@ func TestWhenAnyTrue(t *testing.T) {
 		r, err := startTwoCanCancelTask(30, 250, func(v interface{}) bool {
 			return v.(string) == "ok11"
 		}).Get()
+
+		_, ok := err.(*NoMatchedError)
 		c.So(r, c.ShouldBeNil)
+		c.So(ok, c.ShouldBeTrue)
 		c.So(err, c.ShouldNotBeNil)
+
 		time.Sleep(1000 * time.Millisecond)
 		c.So(c1, c.ShouldEqual, false)
 		c.So(c2, c.ShouldEqual, false)
