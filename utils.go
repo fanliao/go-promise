@@ -141,7 +141,20 @@ func getFutureReturnVal(r *PromiseResult) (interface{}, error) {
 }
 
 //执行回调函数
-func execCallback(r *PromiseResult, dones []func(v interface{}), fails []func(v interface{}), always []func(v interface{})) {
+func execCallback(r *PromiseResult,
+	dones []func(v interface{}),
+	fails []func(v interface{}),
+	always []func(v interface{}),
+	cancels []func()) {
+
+	if r.Typ == RESULT_CANCELLED {
+		fmt.Println("len of cancels is", len(cancels))
+		for _, f := range cancels {
+			f()
+		}
+		return
+	}
+
 	var callbacks []func(v interface{})
 	if r.Typ == RESULT_SUCCESS {
 		callbacks = dones

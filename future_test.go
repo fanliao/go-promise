@@ -711,6 +711,7 @@ func TestWhenAny(t *testing.T) {
 			time.Sleep(1000 * time.Millisecond)
 			c.So(c1, c.ShouldEqual, true)
 		})
+
 	})
 }
 
@@ -787,6 +788,29 @@ func TestWhenAnyTrue(t *testing.T) {
 		c.So(c1, c.ShouldEqual, false)
 		c.So(c2, c.ShouldEqual, false)
 	})
+
+	//c.Convey("When all tasks be cancelled", t, func() {
+	//	getTask := func(canceller Canceller) (interface{}, error) {
+	//		for {
+	//			time.Sleep(50 * time.Millisecond)
+	//			if canceller.IsCancellationRequested() {
+	//				canceller.Cancel()
+	//				return nil, nil
+	//			}
+	//		}
+	//	}
+
+	//	f1 := Start(getTask)
+	//	f2 := Start(getTask)
+	//	f3 := WhenAnyMatched(nil, f1, f2)
+
+	//	f1.RequestCancel()
+	//	f2.RequestCancel()
+
+	//	r, _ := f3.Get()
+	//	c.So(r, c.ShouldBeNil)
+	//})
+
 }
 
 func TestWhenAll(t *testing.T) {
@@ -844,6 +868,31 @@ func TestWhenAll(t *testing.T) {
 			r, err := WhenAllFuture().Get()
 			c.So(r, shouldSlicesReSame, []interface{}{})
 			c.So(err, c.ShouldBeNil)
+		})
+
+		c.Convey("When all tasks be cancelled", func() {
+			fmt.Println("\nWhen all be cancelled.........................")
+			getTask := func(canceller Canceller) (interface{}, error) {
+				for {
+					time.Sleep(50 * time.Millisecond)
+					if canceller.IsCancellationRequested() {
+						fmt.Println("is cancelled......")
+						canceller.Cancel()
+						return nil, nil
+					}
+				}
+			}
+
+			f1 := Start(getTask)
+			f2 := Start(getTask)
+			f3 := WhenAll(f1, f2)
+
+			fmt.Println("request cancel......")
+			f1.RequestCancel()
+			f2.RequestCancel()
+
+			r, _ := f3.Get()
+			c.So(r, c.ShouldBeNil)
 		})
 	})
 

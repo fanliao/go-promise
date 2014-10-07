@@ -223,7 +223,8 @@ func WhenAll(acts ...interface{}) (fu *Future) {
 
 //WhenAll receives Futures slice and returns a Future.
 //If all Futures are resolved, this Future will be resolved and return results slice.
-//Otherwise will rejected with results slice returned by all Futures
+//If any Future is cancelled, this Future will be cancelled.
+//Otherwise will rejected with results slice returned by all Futures.
 func WhenAllFuture(fs ...*Future) *Future {
 	wf := NewPromise()
 	rs := make([]interface{}, len(fs))
@@ -232,6 +233,14 @@ func WhenAllFuture(fs ...*Future) *Future {
 		wf.Resolve([]interface{}{})
 	} else {
 		n := int32(len(fs))
+		cancelOthers := func(j int) {
+			for k, f1 := range fs {
+				if k != j {
+					f1.RequestCancel()
+				}
+			}
+		}
+
 		go func() {
 			isCancelled := int32(0)
 			for i, f := range fs {
@@ -245,16 +254,19 @@ func WhenAllFuture(fs ...*Future) *Future {
 				}).OnFailure(func(v interface{}) {
 					if atomic.CompareAndSwapInt32(&isCancelled, 0, 1) {
 						//try to cancel all futures
-						for k, f1 := range fs {
-							if k != j {
-								f1.RequestCancel()
-							}
-						}
+						cancelOthers(j)
 
 						errs := make([]error, 0, 1)
 						errs = append(errs, v.(error))
 						e := newAggregateError("Error appears in WhenAll:", errs)
 						wf.Reject(e)
+					}
+				}).OnCancel(func() {
+					if atomic.CompareAndSwapInt32(&isCancelled, 0, 1) {
+						//try to cancel all futures
+						cancelOthers(j)
+
+						wf.EnableCanceller().Cancel()
 					}
 				})
 			}

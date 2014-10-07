@@ -13,6 +13,7 @@ resp, err := fu.Get()
 package promise
 
 import (
+	"errors"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -25,6 +26,7 @@ const (
 	CALLBACK_DONE callbackType = iota
 	CALLBACK_FAIL
 	CALLBACK_ALWAYS
+	CALLBACK_CANCEL
 )
 
 //pipe presents a promise that will be chain call
@@ -45,6 +47,7 @@ func (this *pipe) getPipe(isResolved bool) (func(v interface{}) *Future, *Promis
 //futureVal stores the internal state of Future.
 type futureVal struct {
 	dones, fails, always []func(v interface{})
+	cancels              []func()
 	pipes                []*pipe
 	r                    unsafe.Pointer
 }
@@ -137,6 +140,13 @@ func (this *Future) OnComplete(callback func(v interface{})) *Future {
 	return this
 }
 
+//OnCancel registers a callback function that will be called when Promise is cancelled.
+//If promise is already cancelled, the callback will immediately called.
+func (this *Future) OnCancel(callback func()) *Future {
+	this.handleOneCallback(callback, CALLBACK_CANCEL)
+	return this
+}
+
 //Pipe registers one or two functions that returns a Future, and returns a proxy of pipeline Future.
 //First function will be called when Future is resolved, the returned Future will be as pipeline Future.
 //Secondary function will be called when Futrue is rejected, the returned Future will be as pipeline Future.
@@ -195,9 +205,20 @@ func (this *Future) val() *futureVal {
 }
 
 //handleOneCallback registers a callback function
-func (this *Future) handleOneCallback(callback func(v interface{}), t callbackType) {
+func (this *Future) handleOneCallback(callback interface{}, t callbackType) {
 	if callback == nil {
 		return
+	}
+	if (t == CALLBACK_DONE) ||
+		(t == CALLBACK_FAIL) ||
+		(t == CALLBACK_ALWAYS) {
+		if _, ok := callback.(func(v interface{})); !ok {
+			panic(errors.New("Callback function spec must be func(v interface{})"))
+		}
+	} else if t == CALLBACK_CANCEL {
+		if _, ok := callback.(func()); !ok {
+			panic(errors.New("Callback function spec must be func()"))
+		}
 	}
 
 	for {
@@ -207,11 +228,14 @@ func (this *Future) handleOneCallback(callback func(v interface{}), t callbackTy
 			newVal := *v
 			switch t {
 			case CALLBACK_DONE:
-				newVal.dones = append(newVal.dones, callback)
+				newVal.dones = append(newVal.dones, callback.(func(v interface{})))
 			case CALLBACK_FAIL:
-				newVal.fails = append(newVal.fails, callback)
+				newVal.fails = append(newVal.fails, callback.(func(v interface{})))
 			case CALLBACK_ALWAYS:
-				newVal.always = append(newVal.always, callback)
+				newVal.always = append(newVal.always, callback.(func(v interface{})))
+			case CALLBACK_CANCEL:
+				newVal.cancels = append(newVal.cancels, callback.(func()))
+				fmt.Println("new cancenls len is", len(newVal.cancels))
 			}
 
 			//so use CAS to ensure that the state of Future is not changed,
@@ -223,7 +247,11 @@ func (this *Future) handleOneCallback(callback func(v interface{}), t callbackTy
 			if (t == CALLBACK_DONE && r.Typ == RESULT_SUCCESS) ||
 				(t == CALLBACK_FAIL && r.Typ == RESULT_FAILURE) ||
 				(t == CALLBACK_ALWAYS && r.Typ != RESULT_CANCELLED) {
-				callback(r.Result)
+				callbackFunc := callback.(func(v interface{}))
+				callbackFunc(r.Result)
+			} else if t == CALLBACK_CANCEL && r.Typ == RESULT_CANCELLED {
+				callbackFunc := callback.(func())
+				callbackFunc()
 			}
 			break
 		}

@@ -112,6 +112,13 @@ func (this *Promise) OnComplete(callback func(v interface{})) *Promise {
 	return this
 }
 
+//OnCancel registers a callback function that will be called when Promise is cancelled.
+//If promise is already cancelled, the callback will immediately called.
+func (this *Promise) OnCancel(callback func()) *Promise {
+	this.Future.OnCancel(callback)
+	return this
+}
+
 //setResult sets the value and final status of Promise, it will only be executed for once
 func (this *Promise) setResult(r *PromiseResult) (e error) { //r *PromiseResult) {
 	defer func() {
@@ -123,6 +130,7 @@ func (this *Promise) setResult(r *PromiseResult) (e error) { //r *PromiseResult)
 
 	e = errors.New("Cannot resolve/reject/cancel more than once")
 	this.onceEnd.Do(func() {
+		fmt.Println("setResult", r)
 		for {
 			v := this.val()
 			newVal := *v
@@ -139,13 +147,10 @@ func (this *Promise) setResult(r *PromiseResult) (e error) { //r *PromiseResult)
 				close(this.chEnd)
 
 				//call callback functions and start the Promise pipeline
-				//if this Promise is resolved or rejected
-				if r.Typ != RESULT_CANCELLED {
-					execCallback(r, v.dones, v.fails, v.always)
-					for _, pipe := range v.pipes {
-						pipeTask, pipePromise := pipe.getPipe(r.Typ == RESULT_SUCCESS)
-						startPipe(r, pipeTask, pipePromise)
-					}
+				execCallback(r, v.dones, v.fails, v.always, v.cancels)
+				for _, pipe := range v.pipes {
+					pipeTask, pipePromise := pipe.getPipe(r.Typ == RESULT_SUCCESS)
+					startPipe(r, pipeTask, pipePromise)
 				}
 				e = nil
 				break
@@ -199,6 +204,7 @@ func NewPromise() *Promise {
 		make([]func(v interface{}), 0, 8),
 		make([]func(v interface{}), 0, 8),
 		make([]func(v interface{}), 0, 4),
+		make([]func(), 0, 2),
 		make([]*pipe, 0, 4), nil,
 	}
 	f := &Promise{new(sync.Once),
