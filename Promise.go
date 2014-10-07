@@ -54,19 +54,19 @@ type Promise struct {
 //All callback functions will be not called if Promise is cancalled.
 func (this *Promise) Cancel() (e error) {
 	atomic.StoreInt32(&this.cancelStatus, 2)
-	return this.end(&PromiseResult{CANCELLED, RESULT_CANCELLED})
+	return this.setResult(&PromiseResult{CANCELLED, RESULT_CANCELLED})
 }
 
-//Resolve sets the value of promise, and the status will be changed to RESULT_SUCCESS.
+//Resolve sets the value for promise, and the status will be changed to RESULT_SUCCESS.
 //if promise is resolved, Get() will return the value and nil error.
 func (this *Promise) Resolve(v interface{}) (e error) {
-	return this.end(&PromiseResult{v, RESULT_SUCCESS})
+	return this.setResult(&PromiseResult{v, RESULT_SUCCESS})
 }
 
-//Resolve sets the error value of promise, and the status will be changed to RESULT_FAILURE.
+//Resolve sets the error for promise, and the status will be changed to RESULT_FAILURE.
 //if promise is rejected, Get() will return nil and the related error value.
 func (this *Promise) Reject(err error) (e error) {
-	return this.end(&PromiseResult{err, RESULT_FAILURE})
+	return this.setResult(&PromiseResult{err, RESULT_FAILURE})
 }
 
 //EnableCanceller sets a Promise can be cancelled.
@@ -86,34 +86,34 @@ func (this *Promise) Canceller() Canceller {
 	}
 }
 
-//Done registers a callback function that will be called when Promise is resolved.
+//OnSuccess registers a callback function that will be called when Promise is resolved.
 //If promise is already resolved, the callback will immediately called.
 //The value of Promise will be paramter of Done callback function.
-func (this *Promise) Done(callback func(v interface{})) *Promise {
-	this.Future.Done(callback)
+func (this *Promise) OnSuccess(callback func(v interface{})) *Promise {
+	this.Future.OnSuccess(callback)
 	return this
 }
 
-//Fail registers a callback function that will be called when Promise is rejected.
+//OnFailure registers a callback function that will be called when Promise is rejected.
 //If promise is already rejected, the callback will immediately called.
 //The error of Promise will be paramter of Fail callback function.
-func (this *Promise) Fail(callback func(v interface{})) *Promise {
-	this.Future.Fail(callback)
+func (this *Promise) OnFailure(callback func(v interface{})) *Promise {
+	this.Future.OnFailure(callback)
 	return this
 }
 
-//Always register a callback function that will be called when Promise is rejected or resolved.
+//OnComplete register a callback function that will be called when Promise is rejected or resolved.
 //If promise is already rejected or resolved, the callback will immediately called.
 //According to the status of Promise, value or error will be paramter of Always callback function.
 //Value is the paramter if Promise is resolved, or error is the paramter if Promise is rejected.
 //Always callback will be not called if Promise be called.
-func (this *Promise) Always(callback func(v interface{})) *Promise {
-	this.Future.Always(callback)
+func (this *Promise) OnComplete(callback func(v interface{})) *Promise {
+	this.Future.OnComplete(callback)
 	return this
 }
 
-//Sets the value and final status of Promise, it will only be executed for once
-func (this *Promise) end(r *PromiseResult) (e error) { //r *PromiseResult) {
+//setResult sets the value and final status of Promise, it will only be executed for once
+func (this *Promise) setResult(r *PromiseResult) (e error) { //r *PromiseResult) {
 	defer func() {
 		if err := getError(recover()); err != nil {
 			e = err

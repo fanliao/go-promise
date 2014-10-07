@@ -65,9 +65,9 @@ func startPipe(r *PromiseResult, pipeTask func(v interface{}) *Future, pipePromi
 	//处理链式异步任务
 	if pipeTask != nil {
 		f := pipeTask(r.Result)
-		f.Done(func(v interface{}) {
+		f.OnSuccess(func(v interface{}) {
 			pipePromise.Resolve(v)
-		}).Fail(func(v interface{}) {
+		}).OnFailure(func(v interface{}) {
 			pipePromise.Reject(getError(v))
 		})
 	}

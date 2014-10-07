@@ -82,10 +82,10 @@ func WhenAnyTrue(predicate func(interface{}) bool, fs ...*Future) *Future {
 	go func() {
 		for i, f := range fs {
 			k := i
-			f.Done(func(v interface{}) {
+			f.OnSuccess(func(v interface{}) {
 				defer func() { _ = recover() }()
 				chDones <- anyPromiseResult{v, k}
-			}).Fail(func(v interface{}) {
+			}).OnFailure(func(v interface{}) {
 				defer func() { _ = recover() }()
 				chFails <- anyPromiseResult{v, k}
 			})
@@ -244,12 +244,12 @@ func WhenAllFuture(fs ...*Future) *Future {
 			for i, f := range fs {
 				j := i
 
-				f.Done(func(v interface{}) {
+				f.OnSuccess(func(v interface{}) {
 					rs[j] = v
 					if atomic.AddInt32(&n, -1) == 0 {
 						wf.Resolve(rs)
 					}
-				}).Fail(func(v interface{}) {
+				}).OnFailure(func(v interface{}) {
 					if atomic.CompareAndSwapInt32(&isCancelled, 0, 1) {
 						//try to cancel all futures
 						for k, f1 := range fs {

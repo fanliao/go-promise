@@ -237,17 +237,17 @@ func TestCallbacks(t *testing.T) {
 	}()
 
 	c.Convey("When Promise is resolved", t, func() {
-		p.Done(func(v interface{}) {
+		p.OnSuccess(func(v interface{}) {
 			done = true
 			c.Convey("The argument of Done should be 'ok'", t, func() {
 				c.So(v, c.ShouldEqual, "ok")
 			})
-		}).Always(func(v interface{}) {
+		}).OnComplete(func(v interface{}) {
 			always = true
 			c.Convey("The argument of Always should be 'ok'", t, func() {
 				c.So(v, c.ShouldEqual, "ok")
 			})
-		}).Fail(func(v interface{}) {
+		}).OnFailure(func(v interface{}) {
 			fail = true
 			panic("Unexpected calling")
 		})
@@ -268,17 +268,17 @@ func TestCallbacks(t *testing.T) {
 
 	c.Convey("When adding the callback after Promise is resolved", t, func() {
 		done, always, fail := false, false, false
-		p.Done(func(v interface{}) {
+		p.OnSuccess(func(v interface{}) {
 			done = true
 			c.Convey("The argument of Done should be 'ok'", func() {
 				c.So(v, c.ShouldEqual, "ok")
 			})
-		}).Always(func(v interface{}) {
+		}).OnComplete(func(v interface{}) {
 			always = true
 			c.Convey("The argument of Always should be 'ok'", func() {
 				c.So(v, c.ShouldEqual, "ok")
 			})
-		}).Fail(func(v interface{}) {
+		}).OnFailure(func(v interface{}) {
 			fail = true
 			panic("Unexpected calling")
 		})
@@ -298,15 +298,15 @@ func TestCallbacks(t *testing.T) {
 	}()
 
 	c.Convey("When Promise is rejected", t, func() {
-		p.Done(func(v interface{}) {
+		p.OnSuccess(func(v interface{}) {
 			done = true
 			panic("Unexpected calling")
-		}).Always(func(v interface{}) {
+		}).OnComplete(func(v interface{}) {
 			always = true
 			c.Convey("The argument of Always should be error", t, func() {
 				c.So(v, c.ShouldImplement, e)
 			})
-		}).Fail(func(v interface{}) {
+		}).OnFailure(func(v interface{}) {
 			fail = true
 			c.Convey("The argument of Fail should be error", t, func() {
 				c.So(v, c.ShouldImplement, e)
@@ -327,15 +327,15 @@ func TestCallbacks(t *testing.T) {
 
 	c.Convey("When adding the callback after Promise is rejected", t, func() {
 		done, always, fail = false, false, false
-		p.Done(func(v interface{}) {
+		p.OnSuccess(func(v interface{}) {
 			done = true
 			panic("Unexpected calling")
-		}).Always(func(v interface{}) {
+		}).OnComplete(func(v interface{}) {
 			always = true
 			c.Convey("The argument of Always should be error", func() {
 				c.So(v, c.ShouldImplement, e)
 			})
-		}).Fail(func(v interface{}) {
+		}).OnFailure(func(v interface{}) {
 			fail = true
 			c.Convey("The argument of Fail should be error", func() {
 				c.So(v, c.ShouldImplement, e)
@@ -357,11 +357,11 @@ func TestCallbacks(t *testing.T) {
 
 	c.Convey("When Promise is cancelled", t, func() {
 		done, always, fail = false, false, false
-		p.Done(func(v interface{}) {
+		p.OnSuccess(func(v interface{}) {
 			done = true
-		}).Always(func(v interface{}) {
+		}).OnComplete(func(v interface{}) {
 			always = true
-		}).Fail(func(v interface{}) {
+		}).OnFailure(func(v interface{}) {
 			fail = true
 		})
 		r, err := p.Get()
@@ -379,11 +379,11 @@ func TestCallbacks(t *testing.T) {
 
 	c.Convey("When adding the callback after Promise is cancelled", t, func() {
 		done, always, fail = false, false, false
-		p.Done(func(v interface{}) {
+		p.OnSuccess(func(v interface{}) {
 			done = true
-		}).Always(func(v interface{}) {
+		}).OnComplete(func(v interface{}) {
 			always = true
-		}).Fail(func(v interface{}) {
+		}).OnFailure(func(v interface{}) {
 			fail = true
 		})
 		c.Convey("Should not call any callbacks", func() {

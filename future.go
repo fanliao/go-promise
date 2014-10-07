@@ -111,28 +111,28 @@ func (this *Future) GetOrTimeout(mm int) (val interface{}, err error, timout boo
 	}
 }
 
-//Done registers a callback function that will be called when Promise is resolved.
+//OnSuccess registers a callback function that will be called when Promise is resolved.
 //If promise is already resolved, the callback will immediately called.
 //The value of Promise will be paramter of Done callback function.
-func (this *Future) Done(callback func(v interface{})) *Future {
+func (this *Future) OnSuccess(callback func(v interface{})) *Future {
 	this.handleOneCallback(callback, CALLBACK_DONE)
 	return this
 }
 
-//Fail registers a callback function that will be called when Promise is rejected.
+//OnFailure registers a callback function that will be called when Promise is rejected.
 //If promise is already rejected, the callback will immediately called.
 //The error of Promise will be paramter of Fail callback function.
-func (this *Future) Fail(callback func(v interface{})) *Future {
+func (this *Future) OnFailure(callback func(v interface{})) *Future {
 	this.handleOneCallback(callback, CALLBACK_FAIL)
 	return this
 }
 
-//Always register a callback function that will be called when Promise is rejected or resolved.
+//OnComplete register a callback function that will be called when Promise is rejected or resolved.
 //If promise is already rejected or resolved, the callback will immediately called.
 //According to the status of Promise, value or error will be paramter of Always callback function.
 //Value is the paramter if Promise is resolved, or error is the paramter if Promise is rejected.
 //Always callback will be not called if Promise be called.
-func (this *Future) Always(callback func(v interface{})) *Future {
+func (this *Future) OnComplete(callback func(v interface{})) *Future {
 	this.handleOneCallback(callback, CALLBACK_ALWAYS)
 	return this
 }
