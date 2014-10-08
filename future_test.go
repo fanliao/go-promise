@@ -228,7 +228,7 @@ func TestFuture(t *testing.T) {
 
 func TestCallbacks(t *testing.T) {
 	timout := 50 * time.Millisecond
-	done, always, fail := false, false, false
+	done, always, fail, cancel := false, false, false, false
 
 	p := NewPromise()
 	go func() {
@@ -356,40 +356,46 @@ func TestCallbacks(t *testing.T) {
 	}()
 
 	c.Convey("When Promise is cancelled", t, func() {
-		done, always, fail = false, false, false
+		done, always, fail, cancel = false, false, false, false
 		p.OnSuccess(func(v interface{}) {
 			done = true
 		}).OnComplete(func(v interface{}) {
 			always = true
 		}).OnFailure(func(v interface{}) {
 			fail = true
+		}).OnCancel(func() {
+			cancel = true
 		})
 		r, err := p.Get()
 
-		time.Sleep(52 * time.Millisecond)
+		time.Sleep(62 * time.Millisecond)
 
-		c.Convey("Should not call any callbacks", func() {
+		c.Convey("Only cancel callback be called", func() {
 			c.So(r, c.ShouldBeNil)
 			c.So(err, c.ShouldNotBeNil)
 			c.So(done, c.ShouldEqual, false)
 			c.So(always, c.ShouldEqual, false)
 			c.So(fail, c.ShouldEqual, false)
+			c.So(cancel, c.ShouldEqual, true)
 		})
 	})
 
 	c.Convey("When adding the callback after Promise is cancelled", t, func() {
-		done, always, fail = false, false, false
+		done, always, fail, cancel = false, false, false, false
 		p.OnSuccess(func(v interface{}) {
 			done = true
 		}).OnComplete(func(v interface{}) {
 			always = true
 		}).OnFailure(func(v interface{}) {
 			fail = true
+		}).OnCancel(func() {
+			cancel = true
 		})
 		c.Convey("Should not call any callbacks", func() {
 			c.So(done, c.ShouldEqual, false)
 			c.So(always, c.ShouldEqual, false)
 			c.So(fail, c.ShouldEqual, false)
+			c.So(cancel, c.ShouldEqual, true)
 		})
 	})
 
