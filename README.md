@@ -173,7 +173,7 @@ task2 := func() (r interface{}, err error) {
 	time.Sleep(200 * time.Millisecond)
 	return nil, errors.New("fail2")
 }
-f := WhenAny(Start(task1), Start(task2))
+f := WhenAny(task1, task2)
 r, err := f.Get()  //return "ok1", nil
 ```
 
