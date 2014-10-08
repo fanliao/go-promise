@@ -112,17 +112,17 @@ f := Start(task).OnSuccess(func(v ...interface{}) {
 r, err := f.Get()
 ```
 
-### Get the result of future, process will be block until the future task is completed
+### Get the result of future
+
+Please note the process will be block until the future task is completed
 
 ```go
 f := promise.Start(func() (r interface{}, err error) {
-	time.Sleep(500 * time.Millisecond)
 	return "ok", nil  
 })
 r, err := f.Get()  //return "ok", nil
 
 f := promise.Start(func() (r interface{}, err error) {
-	time.Sleep(500 * time.Millisecond)
 	return nil, errors.New("fail")  
 })
 r, err := f.Get()  //return nil, errorString{"fail"}
@@ -143,11 +143,9 @@ r, err, timeout := f.GetOrTimeout(100)  //return nil, nil, true
 Creates a future that will be completed when all of the supplied future are completed.
 ```go
 task1 := func() (r interface{}, err error) {
-	time.Sleep(100 * time.Millisecond)
 	return "ok1", nil
 }
 task2 := func() (r interface{}, err error) {
-	time.Sleep(200 * time.Millisecond)
 	return "ok2", nil
 }
 f := WhenAll(task1, task2)
@@ -157,11 +155,9 @@ r, err := f.Get()    //return []interface{}{"ok1", "ok2"}
 If any future is failure, the future returnd by WhenAll will be failure
 ```go
 task1 := func() (r interface{}, err error)  {
-	time.Sleep(100 * time.Millisecond)
 	return "ok", nil
 }
 task2 := func() (r interface{}, err error)  {
-	time.Sleep(200 * time.Millisecond)
 	return nil, errors.New("fail2")
 }
 f := WhenAll(task1, task2)
@@ -171,7 +167,6 @@ r, ok := f.Get()    //return nil, *AggregateError
 Creates a future that will be completed when any of the supplied tasks is completed.
 ```go
 task1 := func() (r interface{}, err error) {
-	time.Sleep(100 * time.Millisecond)
 	return "ok1", nil
 }
 task2 := func() (r interface{}, err error) {
@@ -186,12 +181,10 @@ r, err := f.Get()  //return "ok1", nil
 
 ```go
 task1 := func() (r interface{}, err error) {
-	time.Sleep(100 * time.Millisecond)
 	return 10, nil
 }
 task2 := func(v interface{}) *Future {
 	return Start(func() (r interface{}, err error) {
-		time.Sleep(100 * time.Millisecond)
 		return v.(int) * 2, nil
 	})
 }
@@ -212,11 +205,10 @@ go func(canceller Canceller){
 	for i < 50 {
 		if canceller.IsCancellationRequested() {
 			p.Cancel()
-			return 0
+			return
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	p.Resolve(1)
 }(p.Canceller())
 f.RequestCancel()
 
@@ -237,7 +229,6 @@ task := func(canceller Canceller) (r interface{}, err error) {
 	return 1, nil
 }
 f := Start(task1)
-time.Sleep(200 * time.Millisecond)
 f.RequestCancel()
 
 r, err := f.Get()   //return nil, promise.CANCELLED
