@@ -17,22 +17,9 @@ func Start(act interface{}, syncs ...bool) *Future {
 		return f
 	}
 
-	action := getAct(pr, act)
-	if syncs != nil && len(syncs) > 0 && !syncs[0] {
-		//sync call
-		r, err := action()
-		if pr.IsCancelled() {
-			pr.Cancel()
-		} else {
-			if err == nil {
-				pr.Resolve(r)
-			} else {
-				pr.Reject(err)
-			}
-		}
-	} else {
-		//async call
-		go func() {
+	if action := getAct(pr, act); action != nil {
+		if syncs != nil && len(syncs) > 0 && !syncs[0] {
+			//sync call
 			r, err := action()
 			if pr.IsCancelled() {
 				pr.Cancel()
@@ -43,7 +30,21 @@ func Start(act interface{}, syncs ...bool) *Future {
 					pr.Reject(err)
 				}
 			}
-		}()
+		} else {
+			//async call
+			go func() {
+				r, err := action()
+				if pr.IsCancelled() {
+					pr.Cancel()
+				} else {
+					if err == nil {
+						pr.Resolve(r)
+					} else {
+						pr.Reject(err)
+					}
+				}
+			}()
+		}
 	}
 
 	return pr.Future
@@ -64,20 +65,29 @@ func Wrap(value interface{}) *Future {
 //WhenAny returns a Future.
 //If any Future is resolved, this Future will be resolved and return result of resolved Future.
 //Otherwise will rejected with results slice returned by all Futures
-func WhenAny(fs ...*Future) *Future {
-	return WhenAnyMatched(nil, fs...)
+func WhenAny(acts ...interface{}) *Future {
+	return WhenAnyMatched(nil, acts...)
 }
 
 //WhenAnyMatched returns a Future.
 //If any Future is resolved and match the predicate, this Future will be resolved and return result of resolved Future.
 //If all Futures are cancelled, this Future will be cancelled.
 //Otherwise will rejected with a NoMatchedError included results slice returned by all Futures
-func WhenAnyMatched(predicate func(interface{}) bool, fs ...*Future) *Future {
+func WhenAnyMatched(predicate func(interface{}) bool, acts ...interface{}) *Future {
 	if predicate == nil {
 		predicate = func(v interface{}) bool { return true }
 	}
 
+	fs := make([]*Future, len(acts))
+	for i, act := range acts {
+		fs[i] = Start(act)
+	}
+
 	nf, rs := NewPromise(), make([]interface{}, len(fs))
+	if len(acts) == 0 {
+		nf.Resolve(nil)
+	}
+
 	chFails, chDones := make(chan anyPromiseResult), make(chan anyPromiseResult)
 
 	go func() {
@@ -96,9 +106,7 @@ func WhenAnyMatched(predicate func(interface{}) bool, fs ...*Future) *Future {
 		}
 	}()
 
-	if len(fs) == 0 {
-		nf.Resolve(nil)
-	} else if len(fs) == 1 {
+	if len(fs) == 1 {
 		select {
 		case r := <-chFails:
 			if _, ok := r.result.(CancelledError); ok {

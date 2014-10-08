@@ -629,7 +629,7 @@ func TestWhenAny(t *testing.T) {
 			}
 			task0 := getTask(0)
 			task1 := getTask(1)
-			f := WhenAny(Start(task0), Start(task1))
+			f := WhenAny(task0, task1)
 			return f
 		}
 
@@ -835,7 +835,7 @@ func TestWhenAll(t *testing.T) {
 		}
 		task0 := getTask(0)
 		task1 := getTask(1)
-		f = WhenAll(Start(task0), Start(task1))
+		f = WhenAll(task0, task1)
 		return f
 	}
 	c.Convey("Test WhenAllFuture", t, func() {
