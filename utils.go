@@ -10,10 +10,19 @@ import (
 
 //NoMatchedError presents no future that returns matched result in WhenAnyTrue function.
 type NoMatchedError struct {
+	Results []interface{}
 }
 
 func (e *NoMatchedError) Error() string {
 	return "No matched future"
+}
+
+func newNoMatchedError(results []interface{}) *NoMatchedError {
+	return &NoMatchedError{results}
+}
+
+func newNoMatchedError1(e interface{}) *NoMatchedError {
+	return &NoMatchedError{[]interface{}{e}}
 }
 
 //AggregateError aggregate multi errors into an error
@@ -45,6 +54,10 @@ func (e *AggregateError) Error() string {
 
 func newAggregateError(s string, innerErrors []error) *AggregateError {
 	return &AggregateError{newErrorWithStacks(s).Error(), innerErrors}
+}
+
+func newAggregateError1(s string, e interface{}) *AggregateError {
+	return &AggregateError{newErrorWithStacks(s).Error(), []error{getError(e)}}
 }
 
 func newErrorWithStacks(i interface{}) (e error) {
@@ -148,7 +161,6 @@ func execCallback(r *PromiseResult,
 	cancels []func()) {
 
 	if r.Typ == RESULT_CANCELLED {
-		fmt.Println("len of cancels is", len(cancels))
 		for _, f := range cancels {
 			f()
 		}

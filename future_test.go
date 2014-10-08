@@ -69,11 +69,11 @@ func TestCancel(t *testing.T) {
 			time.Sleep(50 * time.Millisecond)
 			p.Cancel()
 		}()
+
 		c.Convey("Should return CancelledError", func() {
 			r, err := p.Get()
 			c.So(r, c.ShouldBeNil)
 			c.So(err, c.ShouldEqual, CANCELLED)
-			fmt.Println("p.cancel=", p.cancelStatus)
 			c.So(p.IsCancelled(), c.ShouldBeTrue)
 		})
 	})
@@ -641,7 +641,7 @@ func TestWhenAny(t *testing.T) {
 
 		c.Convey("When all tasks failed", func() {
 			r, err := whenAnyTasks(-280, -250).Get()
-			errs := err.(*AggregateError).InnerErrs
+			errs := err.(*NoMatchedError).Results
 			c.So(r, c.ShouldBeNil)
 			c.So(errs[0].(*myError).val, c.ShouldEqual, "fail0")
 			c.So(errs[1].(*myError).val, c.ShouldEqual, "fail1")
@@ -871,12 +871,10 @@ func TestWhenAll(t *testing.T) {
 		})
 
 		c.Convey("When all tasks be cancelled", func() {
-			fmt.Println("\nWhen all be cancelled.........................")
 			getTask := func(canceller Canceller) (interface{}, error) {
 				for {
 					time.Sleep(50 * time.Millisecond)
 					if canceller.IsCancellationRequested() {
-						fmt.Println("is cancelled......")
 						canceller.Cancel()
 						return nil, nil
 					}
@@ -887,7 +885,6 @@ func TestWhenAll(t *testing.T) {
 			f2 := Start(getTask)
 			f3 := WhenAll(f1, f2)
 
-			fmt.Println("request cancel......")
 			f1.RequestCancel()
 			f2.RequestCancel()
 

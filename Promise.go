@@ -124,13 +124,12 @@ func (this *Promise) setResult(r *PromiseResult) (e error) { //r *PromiseResult)
 	defer func() {
 		if err := getError(recover()); err != nil {
 			e = err
-			fmt.Println("\nerror in end():", err)
+			fmt.Println("\nerror in setResult():", err)
 		}
 	}()
 
 	e = errors.New("Cannot resolve/reject/cancel more than once")
 	this.onceEnd.Do(func() {
-		fmt.Println("setResult", r)
 		for {
 			v := this.val()
 			newVal := *v

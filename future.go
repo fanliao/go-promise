@@ -14,7 +14,6 @@ package promise
 
 import (
 	"errors"
-	"fmt"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -155,7 +154,6 @@ func (this *Future) Pipe(callbacks ...(func(v interface{}) *Future)) (result *Fu
 		(len(callbacks) == 1 && callbacks[0] == nil) ||
 		(len(callbacks) > 1 && callbacks[0] == nil && callbacks[1] == nil) {
 		result = this
-		fmt.Println("return false")
 		return
 	}
 
@@ -235,7 +233,6 @@ func (this *Future) handleOneCallback(callback interface{}, t callbackType) {
 				newVal.always = append(newVal.always, callback.(func(v interface{})))
 			case CALLBACK_CANCEL:
 				newVal.cancels = append(newVal.cancels, callback.(func()))
-				fmt.Println("new cancenls len is", len(newVal.cancels))
 			}
 
 			//so use CAS to ensure that the state of Future is not changed,
