@@ -172,41 +172,6 @@ func WhenAnyMatched(predicate func(interface{}) bool, fs ...*Future) *Future {
 	return nf.Future
 }
 
-//WaitAll returns a Future.
-//If any Future is resolved and match the predicate, this Future will be resolved and return result of resolved Future.
-//Otherwise will rejected with results slice returned by all Futures
-func waitAll(acts ...interface{}) (fu *Future) {
-	pr := NewPromise()
-	fu = pr.Future
-
-	if len(acts) == 0 {
-		pr.Resolve([]interface{}{})
-		return
-	}
-
-	f1 := WhenAll(acts[0 : len(acts)-1]...)
-
-	p := NewPromise()
-	r, err := getAct(p, acts[len(acts)-1])()
-
-	r1, err1 := f1.Get()
-	if err != nil || err1 != nil {
-		errs := newAggregateError("Error appears in WhenAll:", make([]error, 0, len(acts)))
-		if err1 != nil {
-			errs.InnerErrs = append(errs.InnerErrs, (err1.(*AggregateError).InnerErrs)...)
-		}
-		if err != nil {
-			errs.InnerErrs = append(errs.InnerErrs, err)
-		}
-		pr.Reject(errs)
-	} else {
-		rs := r1.([]interface{})
-		rs = append(rs, r)
-		pr.Resolve(rs)
-	}
-	return
-}
-
 //WhenAll receives function slice and returns a Future.
 //If all Futures are resolved, this Future will be resolved and return results slice.
 //Otherwise will rejected with results slice returned by all Futures

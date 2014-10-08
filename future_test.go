@@ -814,7 +814,7 @@ func TestWhenAnyTrue(t *testing.T) {
 }
 
 func TestWhenAll(t *testing.T) {
-	startTwoTask := func(t1 int, t2 int, wait bool) (f *Future) {
+	startTwoTask := func(t1 int, t2 int) (f *Future) {
 		timeouts := []time.Duration{time.Duration(t1), time.Duration(t2)}
 		getTask := func(i int) func() (interface{}, error) {
 			return func() (interface{}, error) {
@@ -829,16 +829,12 @@ func TestWhenAll(t *testing.T) {
 		}
 		task0 := getTask(0)
 		task1 := getTask(1)
-		if wait {
-			f = waitAll(task0, task1)
-		} else {
-			f = whenAllFuture(Start(task0), Start(task1))
-		}
+		f = WhenAll(Start(task0), Start(task1))
 		return f
 	}
 	c.Convey("Test WhenAllFuture", t, func() {
 		whenTwoTask := func(t1 int, t2 int) *Future {
-			return startTwoTask(t1, t2, false)
+			return startTwoTask(t1, t2)
 		}
 		c.Convey("When all tasks completed, and the task1 is the first to complete", func() {
 			r, err := whenTwoTask(200, 230).Get()
@@ -890,42 +886,6 @@ func TestWhenAll(t *testing.T) {
 
 			r, _ := f3.Get()
 			c.So(r, c.ShouldBeNil)
-		})
-	})
-
-	c.Convey("Test WaitAll", t, func() {
-		waitTwoTask := func(t1 int, t2 int) *Future {
-			return startTwoTask(t1, t2, true)
-		}
-		c.Convey("When all tasks completed, and the task1 is the first to complete", func() {
-			r, err := waitTwoTask(200, 250).Get()
-			c.So(r, shouldSlicesReSame, []interface{}{"ok0", "ok1"})
-			c.So(err, c.ShouldBeNil)
-		})
-
-		c.Convey("When all tasks completed, and the task2 is the first to complete", func() {
-			r, err := waitTwoTask(250, 210).Get()
-			c.So(r, shouldSlicesReSame, []interface{}{"ok0", "ok1"})
-			c.So(err, c.ShouldBeNil)
-		})
-
-		c.Convey("When task1 failed, and task2 completed", func() {
-			r, err := waitTwoTask(-250, 210).Get()
-			c.So(err.(*AggregateError).InnerErrs[0].(*myError).val, c.ShouldEqual, "fail0")
-			c.So(r, c.ShouldBeNil)
-		})
-
-		c.Convey("When all tasks failed", func() {
-			r, err := waitTwoTask(-250, -210).Get()
-			c.So(err.(*AggregateError).InnerErrs[0].(*myError).val, c.ShouldEqual, "fail0")
-			c.So(err.(*AggregateError).InnerErrs[1].(*myError).val, c.ShouldEqual, "fail1")
-			c.So(r, c.ShouldBeNil)
-		})
-
-		c.Convey("When no task be passed", func() {
-			r, err := waitAll().Get()
-			c.So(r, shouldSlicesReSame, []interface{}{})
-			c.So(err, c.ShouldBeNil)
 		})
 	})
 }
