@@ -131,14 +131,14 @@ func (this *Promise) setResult(r *PromiseResult) (e error) { //r *PromiseResult)
 	e = errors.New("Cannot resolve/reject/cancel more than once")
 	this.onceEnd.Do(func() {
 		for {
-			v := this.val()
+			v := this.loadVal()
 			newVal := *v
 			newVal.r = unsafe.Pointer(r)
 
 			//Use CAS operation to ensure that the state of Promise isn't changed.
 			//If the state is changed, must get latest state and try to call CAS again.
 			//No ABA issue in this case because address of all objects are different.
-			if atomic.CompareAndSwapPointer(&this.v, unsafe.Pointer(v), unsafe.Pointer(&newVal)) {
+			if atomic.CompareAndSwapPointer(&this.val, unsafe.Pointer(v), unsafe.Pointer(&newVal)) {
 				//chOut will be returned in GetChan(), so send the result to chOut
 				this.chOut <- r
 

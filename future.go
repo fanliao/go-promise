@@ -58,7 +58,7 @@ type Future struct {
 	chOut chan *PromiseResult
 	chEnd chan struct{}
 	//指向futureVal的指针，程序要保证该指针指向的对象内容不会发送变化，任何变化都必须生成新对象并通过原子操作更新指针，以避免lock
-	v            unsafe.Pointer
+	val          unsafe.Pointer
 	cancelStatus int32
 }
 
@@ -117,7 +117,7 @@ func (this *Future) GetOrTimeout(mm int) (val interface{}, err error, timout boo
 //If promise is already resolved, the callback will immediately called.
 //The value of Promise will be paramter of Done callback function.
 func (this *Future) OnSuccess(callback func(v interface{})) *Future {
-	this.handleOneCallback(callback, CALLBACK_DONE)
+	this.addCallback(callback, CALLBACK_DONE)
 	return this
 }
 
@@ -125,7 +125,7 @@ func (this *Future) OnSuccess(callback func(v interface{})) *Future {
 //If promise is already rejected, the callback will immediately called.
 //The error of Promise will be paramter of Fail callback function.
 func (this *Future) OnFailure(callback func(v interface{})) *Future {
-	this.handleOneCallback(callback, CALLBACK_FAIL)
+	this.addCallback(callback, CALLBACK_FAIL)
 	return this
 }
 
@@ -135,14 +135,14 @@ func (this *Future) OnFailure(callback func(v interface{})) *Future {
 //Value is the paramter if Promise is resolved, or error is the paramter if Promise is rejected.
 //Always callback will be not called if Promise be called.
 func (this *Future) OnComplete(callback func(v interface{})) *Future {
-	this.handleOneCallback(callback, CALLBACK_ALWAYS)
+	this.addCallback(callback, CALLBACK_ALWAYS)
 	return this
 }
 
 //OnCancel registers a callback function that will be called when Promise is cancelled.
 //If promise is already cancelled, the callback will immediately called.
 func (this *Future) OnCancel(callback func()) *Future {
-	this.handleOneCallback(callback, CALLBACK_CANCEL)
+	this.addCallback(callback, CALLBACK_CANCEL)
 	return this
 }
 
@@ -159,7 +159,7 @@ func (this *Future) Pipe(callbacks ...(func(v interface{}) *Future)) (result *Fu
 
 	//this.oncePipe.Do(func() {
 	for {
-		v := this.val()
+		v := this.loadVal()
 		r := (*PromiseResult)(v.r)
 		if r != nil {
 			result = this
@@ -179,7 +179,7 @@ func (this *Future) Pipe(callbacks ...(func(v interface{}) *Future)) (result *Fu
 			newVal := *v
 			newVal.pipes = append(newVal.pipes, newPipe)
 			//通过CAS操作检测Future对象的原始状态未发生改变，否则需要重试
-			if atomic.CompareAndSwapPointer(&this.v, unsafe.Pointer(v), unsafe.Pointer(&newVal)) {
+			if atomic.CompareAndSwapPointer(&this.val, unsafe.Pointer(v), unsafe.Pointer(&newVal)) {
 				result = newPipe.pipePromise.Future
 				break
 			}
@@ -192,18 +192,18 @@ func (this *Future) Pipe(callbacks ...(func(v interface{}) *Future)) (result *Fu
 
 //result uses Atomic load to return result of the Future
 func (this *Future) result() *PromiseResult {
-	val := this.val()
+	val := this.loadVal()
 	return (*PromiseResult)(val.r)
 }
 
 //val uses Atomic load to return state value of the Future
-func (this *Future) val() *futureVal {
-	r := atomic.LoadPointer(&this.v)
+func (this *Future) loadVal() *futureVal {
+	r := atomic.LoadPointer(&this.val)
 	return (*futureVal)(r)
 }
 
 //handleOneCallback registers a callback function
-func (this *Future) handleOneCallback(callback interface{}, t callbackType) {
+func (this *Future) addCallback(callback interface{}, t callbackType) {
 	if callback == nil {
 		return
 	}
@@ -220,7 +220,7 @@ func (this *Future) handleOneCallback(callback interface{}, t callbackType) {
 	}
 
 	for {
-		v := this.val()
+		v := this.loadVal()
 		r := (*PromiseResult)(v.r)
 		if r == nil {
 			newVal := *v
@@ -237,7 +237,7 @@ func (this *Future) handleOneCallback(callback interface{}, t callbackType) {
 
 			//so use CAS to ensure that the state of Future is not changed,
 			//if the state is changed, will retry CAS operation.
-			if atomic.CompareAndSwapPointer(&this.v, unsafe.Pointer(v), unsafe.Pointer(&newVal)) {
+			if atomic.CompareAndSwapPointer(&this.val, unsafe.Pointer(v), unsafe.Pointer(&newVal)) {
 				break
 			}
 		} else {

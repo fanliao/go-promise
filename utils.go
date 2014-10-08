@@ -17,6 +17,15 @@ func (e *NoMatchedError) Error() string {
 	return "No matched future"
 }
 
+func (e *NoMatchedError) HasError() bool {
+	for _, ie := range e.Results {
+		if _, ok1 := ie.(error); ok1 {
+			return true
+		}
+	}
+	return false
+}
+
 func newNoMatchedError(results []interface{}) *NoMatchedError {
 	return &NoMatchedError{results}
 }

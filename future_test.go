@@ -830,9 +830,9 @@ func TestWhenAll(t *testing.T) {
 		task0 := getTask(0)
 		task1 := getTask(1)
 		if wait {
-			f = WaitAll(task0, task1)
+			f = waitAll(task0, task1)
 		} else {
-			f = WhenAllFuture(Start(task0), Start(task1))
+			f = whenAllFuture(Start(task0), Start(task1))
 		}
 		return f
 	}
@@ -865,7 +865,7 @@ func TestWhenAll(t *testing.T) {
 		})
 
 		c.Convey("When no task be passed", func() {
-			r, err := WhenAllFuture().Get()
+			r, err := whenAllFuture().Get()
 			c.So(r, shouldSlicesReSame, []interface{}{})
 			c.So(err, c.ShouldBeNil)
 		})
@@ -923,7 +923,7 @@ func TestWhenAll(t *testing.T) {
 		})
 
 		c.Convey("When no task be passed", func() {
-			r, err := WaitAll().Get()
+			r, err := waitAll().Get()
 			c.So(r, shouldSlicesReSame, []interface{}{})
 			c.So(err, c.ShouldBeNil)
 		})

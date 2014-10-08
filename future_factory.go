@@ -175,7 +175,7 @@ func WhenAnyMatched(predicate func(interface{}) bool, fs ...*Future) *Future {
 //WaitAll returns a Future.
 //If any Future is resolved and match the predicate, this Future will be resolved and return result of resolved Future.
 //Otherwise will rejected with results slice returned by all Futures
-func WaitAll(acts ...interface{}) (fu *Future) {
+func waitAll(acts ...interface{}) (fu *Future) {
 	pr := NewPromise()
 	fu = pr.Future
 
@@ -223,7 +223,7 @@ func WhenAll(acts ...interface{}) (fu *Future) {
 	for i, act := range acts {
 		fs[i] = Start(act)
 	}
-	fu = WhenAllFuture(fs...)
+	fu = whenAllFuture(fs...)
 	return
 }
 
@@ -231,7 +231,7 @@ func WhenAll(acts ...interface{}) (fu *Future) {
 //If all Futures are resolved, this Future will be resolved and return results slice.
 //If any Future is cancelled, this Future will be cancelled.
 //Otherwise will rejected with results slice returned by all Futures.
-func WhenAllFuture(fs ...*Future) *Future {
+func whenAllFuture(fs ...*Future) *Future {
 	wf := NewPromise()
 	rs := make([]interface{}, len(fs))
 
@@ -262,9 +262,9 @@ func WhenAllFuture(fs ...*Future) *Future {
 						//try to cancel all futures
 						cancelOthers(j)
 
-						errs := make([]error, 0, 1)
-						errs = append(errs, v.(error))
-						e := newAggregateError("Error appears in WhenAll:", errs)
+						//errs := make([]error, 0, 1)
+						//errs = append(errs, v.(error))
+						e := newAggregateError1("Error appears in WhenAll:", v)
 						wf.Reject(e)
 					}
 				}).OnCancel(func() {
