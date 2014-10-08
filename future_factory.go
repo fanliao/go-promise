@@ -70,6 +70,7 @@ func WhenAny(fs ...*Future) *Future {
 
 //WhenAnyMatched returns a Future.
 //If any Future is resolved and match the predicate, this Future will be resolved and return result of resolved Future.
+//If all Futures are cancelled, this Future will be cancelled.
 //Otherwise will rejected with a AggregateError included results slice returned by all Futures
 func WhenAnyMatched(predicate func(interface{}) bool, fs ...*Future) *Future {
 	if predicate == nil {
@@ -88,6 +89,9 @@ func WhenAnyMatched(predicate func(interface{}) bool, fs ...*Future) *Future {
 			}).OnFailure(func(v interface{}) {
 				defer func() { _ = recover() }()
 				chFails <- anyPromiseResult{v, k}
+			}).OnCancel(func() {
+				defer func() { _ = recover() }()
+				chFails <- anyPromiseResult{CANCELLED, k}
 			})
 		}
 	}()
@@ -97,9 +101,13 @@ func WhenAnyMatched(predicate func(interface{}) bool, fs ...*Future) *Future {
 	} else if len(fs) == 1 {
 		select {
 		case r := <-chFails:
-			errs := make([]error, 1)
-			errs[0] = getError(r.result)
-			nf.Reject(newAggregateError("Error appears in WhenAnyTrue:", errs))
+			if _, ok := r.result.(CancelledError); ok {
+				nf.Cancel()
+			} else {
+				errs := make([]error, 1)
+				errs[0] = getError(r.result)
+				nf.Reject(newAggregateError("Error appears in WhenAnyTrue:", errs))
+			}
 		case r := <-chDones:
 			if predicate(r.result) {
 				nf.Resolve(r.result)
@@ -144,19 +152,23 @@ func WhenAnyMatched(predicate func(interface{}) bool, fs ...*Future) *Future {
 				}
 
 				if j++; j == len(fs) {
-					errs, k := make([]error, j), 0
+					errs, k, m := make([]error, j), 0, 0
 					for _, r := range rs {
 						switch val := r.(type) {
+						case CancelledError:
 						case error:
 							errs[k] = val
 							k++
 						default:
+							m++
 						}
 					}
 					if k > 0 {
 						nf.Reject(newAggregateError("Error appears in WhenAnyTrue:", errs[0:j]))
-					} else {
+					} else if m > 0 {
 						nf.Reject(&NoMatchedError{})
+					} else {
+						nf.Cancel()
 					}
 					break
 				}
