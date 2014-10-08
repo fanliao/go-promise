@@ -112,6 +112,12 @@ func getAct(pr *Promise, act interface{}) (f func() (r interface{}, err error)) 
 			return nil, nil
 		}
 	default:
+		if e, ok := v.(error); !ok {
+			pr.Resolve(v)
+		} else {
+			pr.Reject(e)
+		}
+		return nil
 	}
 
 	//If paramters of act function has a Canceller interface, the Future will can be cancelled.
@@ -120,6 +126,7 @@ func getAct(pr *Promise, act interface{}) (f func() (r interface{}, err error)) 
 		pr.EnableCanceller()
 		canceller = pr.Canceller()
 	}
+
 	//return proxy function of act function
 	f = func() (r interface{}, err error) {
 		defer func() {
