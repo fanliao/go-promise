@@ -244,3 +244,4 @@ When call WhenAny() function, if a future is completed correctly, then will try 
 
 ## License
 
+go-plinq is licensed under the MIT Licence, (http://www.apache.org/licenses/LICENSE-2.0.html).
