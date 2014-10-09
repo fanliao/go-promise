@@ -129,33 +129,36 @@ func (this *Promise) setResult(r *PromiseResult) (e error) { //r *PromiseResult)
 	}()
 
 	e = errors.New("Cannot resolve/reject/cancel more than once")
-	this.onceEnd.Do(func() {
-		for {
-			v := this.loadVal()
-			newVal := *v
-			newVal.r = unsafe.Pointer(r)
+	v := this.loadVal()
+	if v.r != nil {
+		return
+	}
 
-			//Use CAS operation to ensure that the state of Promise isn't changed.
-			//If the state is changed, must get latest state and try to call CAS again.
-			//No ABA issue in this case because address of all objects are different.
-			if atomic.CompareAndSwapPointer(&this.val, unsafe.Pointer(v), unsafe.Pointer(&newVal)) {
-				//chOut will be returned in GetChan(), so send the result to chOut
-				this.chOut <- r
+	for {
+		newVal := *v
+		newVal.r = r
 
-				//Close chEnd then all Get() and GetOrTimeout() will be unblocked
-				close(this.chEnd)
+		//Use CAS operation to ensure that the state of Promise isn't changed.
+		//If the state is changed, must get latest state and try to call CAS again.
+		//No ABA issue in this case because address of all objects are different.
+		if atomic.CompareAndSwapPointer(&this.val, unsafe.Pointer(v), unsafe.Pointer(&newVal)) {
+			//chOut will be returned in GetChan(), so send the result to chOut
+			this.chOut <- r
 
-				//call callback functions and start the Promise pipeline
-				execCallback(r, v.dones, v.fails, v.always, v.cancels)
-				for _, pipe := range v.pipes {
-					pipeTask, pipePromise := pipe.getPipe(r.Typ == RESULT_SUCCESS)
-					startPipe(r, pipeTask, pipePromise)
-				}
-				e = nil
-				break
+			//Close chEnd then all Get() and GetOrTimeout() will be unblocked
+			close(this.chEnd)
+
+			//call callback functions and start the Promise pipeline
+			execCallback(r, v.dones, v.fails, v.always, v.cancels)
+			for _, pipe := range v.pipes {
+				pipeTask, pipePromise := pipe.getPipe(r.Typ == RESULT_SUCCESS)
+				startPipe(r, pipeTask, pipePromise)
 			}
+			e = nil
+			break
 		}
-	})
+		v = this.loadVal()
+	}
 	return
 }
 
