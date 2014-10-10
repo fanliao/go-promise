@@ -66,7 +66,8 @@ go func(){
 	if err != nil {
 		p.Reject(err)
 	}
-        body, err := ioutil.ReadAll(resp.Body)
+	
+	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		p.Reject(err)
 	}
@@ -95,18 +96,19 @@ task := func()(r interface{}, err error){
 	if err != nil {
 		return nil, err
 	}
-        body, err := ioutil.ReadAll(resp.Body)
+	
+	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
 	return body, nil
 }
 
-f := Start(task).OnSuccess(func(v ...interface{}) {
+f := promise.Start(task).OnSuccess(func(v interface{}) {
    ...
-}).OnFailure(func(v ...interface{}) {
+}).OnFailure(func(v interface{}) {
    ...
-}).OnComplete(func(v ...interface{}) {
+}).OnComplete(func(v interface{}) {
    ...
 })
 r, err := f.Get()
@@ -148,7 +150,8 @@ task1 := func() (r interface{}, err error) {
 task2 := func() (r interface{}, err error) {
 	return "ok2", nil
 }
-f := WhenAll(task1, task2)
+
+f := promise.WhenAll(task1, task2)
 r, err := f.Get()    //return []interface{}{"ok1", "ok2"}
 ```
 
@@ -160,7 +163,7 @@ task1 := func() (r interface{}, err error)  {
 task2 := func() (r interface{}, err error)  {
 	return nil, errors.New("fail2")
 }
-f := WhenAll(task1, task2)
+f := promise.WhenAll(task1, task2)
 r, ok := f.Get()    //return nil, *AggregateError
 ```
 
@@ -173,7 +176,8 @@ task2 := func() (r interface{}, err error) {
 	time.Sleep(200 * time.Millisecond)
 	return nil, errors.New("fail2")
 }
-f := WhenAny(task1, task2)
+
+f := promise.WhenAny(task1, task2)
 r, err := f.Get()  //return "ok1", nil
 ```
 
@@ -188,7 +192,8 @@ task2 := func(v interface{}) *Future {
 		return v.(int) * 2, nil
 	})
 }
-f := Start(task1).Pipe(task2)
+
+f := promise.Start(task1).Pipe(task2)
 r, err := f.Get()   //return 20
 ```
 
@@ -201,7 +206,7 @@ import "net/http"
 
 p := promise.NewPromise().EnableCanceller()
 
-go func(canceller Canceller){
+go func(canceller promise.Canceller){
 	for i < 50 {
 		if canceller.IsCancellationRequested() {
 			p.Cancel()
@@ -218,7 +223,7 @@ fmt.Println(p.Future.IsCancelled())      //true
 
 Or can use Start to submit a future task which can be cancelled
 ```go
-task := func(canceller Canceller) (r interface{}, err error) {
+task := func(canceller promise.Canceller) (r interface{}, err error) {
 	for i < 50 {
 		if canceller.IsCancellationRequested() {
 			canceller.Cancel()
@@ -228,7 +233,7 @@ task := func(canceller Canceller) (r interface{}, err error) {
 	}
 	return 1, nil
 }
-f := Start(task1)
+f := promise.Start(task1)
 f.RequestCancel()
 
 r, err := f.Get()   //return nil, promise.CANCELLED
