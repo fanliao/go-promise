@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"sync"
 	"sync/atomic"
 	"unsafe"
 )
@@ -45,7 +44,6 @@ type PromiseResult struct {
 //You can use Resolve/Reject/Cancel to set the final result of Promise.
 //Future can return a read-only placeholder view of result.
 type Promise struct {
-	onceEnd *sync.Once
 	*Future
 }
 
@@ -209,7 +207,7 @@ func NewPromise() *Promise {
 		make([]func(), 0, 2),
 		make([]*pipe, 0, 4), nil,
 	}
-	f := &Promise{new(sync.Once),
+	f := &Promise{
 		&Future{
 			rand.Int(),
 			make(chan *PromiseResult, 1),
