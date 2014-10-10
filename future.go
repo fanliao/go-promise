@@ -48,7 +48,7 @@ type futureVal struct {
 	dones, fails, always []func(v interface{})
 	cancels              []func()
 	pipes                []*pipe
-	r                    unsafe.Pointer
+	r                    *PromiseResult
 }
 
 //Future provides a read-only view of promise,
@@ -91,7 +91,7 @@ func (this *Future) GetChan() chan *PromiseResult {
 //If Future is cancelled, nil and CANCELLED error will be returned.
 func (this *Future) Get() (val interface{}, err error) {
 	<-this.chEnd
-	return getFutureReturnVal(this.result())
+	return getFutureReturnVal(this.loadResult())
 }
 
 //GetOrTimeout is similar to Get(), but GetOrTimeout will not block after timeout.
@@ -108,7 +108,7 @@ func (this *Future) GetOrTimeout(mm int) (val interface{}, err error, timout boo
 	case <-time.After((time.Duration)(mm) * time.Nanosecond):
 		return nil, nil, true
 	case <-this.chEnd:
-		r, err := getFutureReturnVal(this.result())
+		r, err := getFutureReturnVal(this.loadResult())
 		return r, err, false
 	}
 }
@@ -160,7 +160,7 @@ func (this *Future) Pipe(callbacks ...(func(v interface{}) *Future)) (result *Fu
 	//this.oncePipe.Do(func() {
 	for {
 		v := this.loadVal()
-		r := (*PromiseResult)(v.r)
+		r := v.r
 		if r != nil {
 			result = this
 			if r.Typ == RESULT_SUCCESS && callbacks[0] != nil {
@@ -191,9 +191,9 @@ func (this *Future) Pipe(callbacks ...(func(v interface{}) *Future)) (result *Fu
 }
 
 //result uses Atomic load to return result of the Future
-func (this *Future) result() *PromiseResult {
+func (this *Future) loadResult() *PromiseResult {
 	val := this.loadVal()
-	return (*PromiseResult)(val.r)
+	return val.r
 }
 
 //val uses Atomic load to return state value of the Future
@@ -221,7 +221,7 @@ func (this *Future) addCallback(callback interface{}, t callbackType) {
 
 	for {
 		v := this.loadVal()
-		r := (*PromiseResult)(v.r)
+		r := v.r
 		if r == nil {
 			newVal := *v
 			switch t {
