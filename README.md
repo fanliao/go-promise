@@ -20,7 +20,7 @@ Inspired by [Futures and promises]()
   * ```.OnCancel()```
 * Get the value of the future
   * ```.Get() ```
-  * ```.GetOrTimeout()```
+  * ```.GetOrTimeout(ms)```
   * ```.GetChan()```
 * Multiple promises
   * ```WhenAll(f1, f2, f3, ...)```
@@ -33,7 +33,9 @@ Inspired by [Futures and promises]()
   * ```.RequestCancel()```
   * ```.IsCancellationRequested()```
   * ```.Cancel()```
-  * ```.IsCancelled()```
+  * ```.IsCancelled(ms)```
+* Set timeout for Future
+  * ```.SetTimeout()```
 * Function wrappers
   * ```Start(func() (r interface{}, e error))```
   * ```Start(func())```
@@ -144,7 +146,7 @@ f := promise.Start(func() (r interface{}, err error) {
 r, err, timeout := f.GetOrTimeout(100)  //return nil, nil, true
 ```
 
-### Waits for multiple futures
+### Merge multiple futures
 
 Creates a future that will be completed when all of the supplied future are completed.
 ```go
@@ -201,7 +203,7 @@ f := promise.Start(task1).Pipe(task2)
 r, err := f.Get()   //return 20
 ```
 
-### Cancel the future
+### Cancel the future or set timeout
 
 If need cancel a future, need pass a canceller object to task function
 ```go
@@ -246,11 +248,27 @@ fmt.Println(f.IsCancelled())      //true
 
 When call WhenAny() function, if a future is completed correctly, then will try to check if other futures  enable cancel. If yes, will request cancelling all other futures.
 
+You can also set timeout for a future
+
+```go
+task := func(canceller promise.Canceller) (r interface{}, err error) {
+	time.Sleep(300 * time.Millisecond)
+	fmt.Println("Run done")
+	return 0, nil
+}
+
+f := promise.Start(task).OnCancel(func() {
+	fmt.Println("Future is cancelled")
+}).SetTimeout(100)
+
+r, err := f.Get() //return nil, promise.CANCELLED
+fmt.Println(f.IsCancelled()) //print true
+```
 
 ## Document
 
-
+Outstanding...
 
 ## License
 
-go-plinq is licensed under the MIT Licence, (http://www.apache.org/licenses/LICENSE-2.0.html).
+go-promise is licensed under the MIT Licence, (http://www.apache.org/licenses/LICENSE-2.0.html).
