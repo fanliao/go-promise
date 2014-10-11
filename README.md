@@ -14,13 +14,14 @@ Inspired by [Futures and promises]()
   * ```NewPromise()```
   * ```promise.Future```
 * Promise and Future callbacks
-  * ```.OnSuccess(...)```
-  * ```.OnFailure(...)```
-  * ```.OnComplete(...)```
-  * ```.OnCancel(...)```
+  * ```.OnSuccess(v interface{})```
+  * ```.OnFailure(v interface{})```
+  * ```.OnComplete(v interface{})```
+  * ```.OnCancel()```
 * Get the value of the future
   * ```.Get() ```
   * ```.GetOrTimeout()```
+  * ```.GetChan()```
 * Multiple promises
   * ```WhenAll(f1, f2, f3, ...)```
   * ```WhenAny(f1, f2, f3, ...)```
@@ -34,7 +35,10 @@ Inspired by [Futures and promises]()
   * ```.Cancel()```
   * ```.IsCancelled()```
 * Function wrappers
-  * ```Start(func() []interface{})```
+  * ```Start(func() (r interface{}, e error))```
+  * ```Start(func())```
+  * ```Start(func(canceller Canceller) (r interface{}, e error))```
+  * ```Start(func(canceller Canceller))```
 * Immediate wrappers
   * ```Wrap(interface{})```
 * Chain API
@@ -50,11 +54,11 @@ import "github.com/fanliao/go-promise"
 import "net/http"
 
 p := promise.NewPromise()
-p.OnSuccess(func(v ...interface{}) {
+p.OnSuccess(func(v interface{}) {
    ...
-}).OnFailure(func(v ...interface{}) {
+}).OnFailure(func(v interface{}) {
    ...
-}).OnComplete(func(v ...interface{}) {
+}).OnComplete(func(v interface{}) {
    ...
 })
 
