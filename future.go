@@ -69,7 +69,7 @@ func (this *canceller) RequestCancel() {
 //IsCancellationRequested returns true if Future task is requested to cancel, otherwise false.
 //Future task function can use this method to detect if Future is requested to cancel.
 func (this *canceller) IsCancellationRequested() (r bool) {
-	return atomic.LoadInt32(&this.f.cancelStatus) == 1
+	return atomic.LoadInt32(&this.f.cancelStatus) >= 1
 }
 
 //Cancel sets Future task to CANCELLED status
@@ -130,6 +130,23 @@ func (this *Future) IsCancelled() bool {
 	return ccstatus == 2
 }
 
+//Cancel sets the status of promise to RESULT_CANCELLED.
+//If promise is cancelled, Get() will return nil and CANCELLED error.
+//All callback functions will be not called if Promise is cancalled.
+func (this *Future) SetTimeout(mm int) *Future {
+	if mm == 0 {
+		mm = 10
+	} else {
+		mm = mm * 1000 * 1000
+	}
+
+	go func() {
+		<-time.After((time.Duration)(mm) * time.Nanosecond)
+		this.Cancel()
+	}()
+	return this
+}
+
 //GetChan returns a channel than can be used to receive result of Promise
 func (this *Future) GetChan() chan *PromiseResult {
 	return this.chOut
@@ -147,7 +164,7 @@ func (this *Future) Get() (val interface{}, err error) {
 //GetOrTimeout is similar to Get(), but GetOrTimeout will not block after timeout.
 //If GetOrTimeout returns with a timeout, timeout value will be true in return values.
 //The unit of paramter is millisecond.
-func (this *Future) GetOrTimeout(mm int) (val interface{}, err error, timout bool) {
+func (this *Future) GetOrTimeout(mm uint) (val interface{}, err error, timout bool) {
 	if mm == 0 {
 		mm = 10
 	} else {
