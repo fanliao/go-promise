@@ -22,7 +22,7 @@ Inspired by [Futures and promises]()
   * ```.Get() ```
   * ```.GetOrTimeout(ms)```
   * ```.GetChan()```
-* Multiple promises
+* Merge multiple promises
   * ```WhenAll(f1, f2, f3, ...)```
   * ```WhenAny(f1, f2, f3, ...)```
   * ```WhenAnyMatched(predicate, f1, f2, f3, ...)```
