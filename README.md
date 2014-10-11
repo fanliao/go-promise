@@ -14,27 +14,31 @@ Inspired by [Futures and promises]()
   * ```NewPromise()```
   * ```promise.Future```
 * Promise and Future callbacks
-  * ```.Done(...)```
-  * ```.Fail(...)```
-  * ```.Always(...)```
+  * ```.OnSuccess(...)```
+  * ```.OnFailure(...)```
+  * ```.OnComplete(...)```
+  * ```.OnCancel(...)```
 * Get the value of the future
   * ```.Get() ```
   * ```.GetOrTimeout()```
 * Multiple promises
   * ```WhenAll(f1, f2, f3, ...)```
   * ```WhenAny(f1, f2, f3, ...)```
+  * ```WhenAnyMatched(predicate, f1, f2, f3, ...)```
 * Pipe
   * ```.Pipe(futureWithDone, futureWithFail)```
 * Cancel the future
   * ```.EnableCanceller()```
   * ```.RequestCancel()```
-* Function value wrappers
+  * ```.IsCancellationRequested()```
+  * ```.Cancel()```
+  * ```.IsCancelled()```
+* Function wrappers
   * ```Start(func() []interface{})```
-  * ```StartCanCancel(func(canceller Canceller) []interface{})```
 * Immediate wrappers
   * ```Wrap(interface{})```
 * Chain API
-  * ```Start(taskDone).Done(done1).Fail(fail1).Always(alwaysForDone1).Pipe(f1, f2).Done(done2)```
+  * ```Start(taskDone).OnSuccess(done1).OnFailure(fail1).Pipe(f1, f2).OnSuccess(done2)```
 
 	
 ## Quick start
@@ -46,11 +50,11 @@ import "github.com/fanliao/go-promise"
 import "net/http"
 
 p := promise.NewPromise()
-p.Done(func(v ...interface{}) {
+p.OnSuccess(func(v ...interface{}) {
    ...
-}).Always(func(v ...interface{}) {
+}).OnFailure(func(v ...interface{}) {
    ...
-}).Fail(func(v ...interface{}) {
+}).OnComplete(func(v ...interface{}) {
    ...
 })
 
@@ -60,13 +64,16 @@ go func(){
 	resp, err := http.Get(url)
 	defer resp.Body.Close()
 	if err != nil {
-		// handle error
-		...
-		p.Reject(url, err)
+		p.Reject(err)
 	}
-	p.Resolve(url, resp.Body)
+	
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		p.Reject(err)
+	}
+	p.Resolve(body)
 }()
-r, typ := p.Get()
+r, err := p.Get()
 ```
 
 If you want to provide a read-only view, you can get a future variable:
@@ -81,164 +88,159 @@ Can use Start function to submit a future task, it will return a future variable
 import "github.com/fanliao/go-promise"
 import "net/http"
 
-task := func()(r []interface{}){
+task := func()(r interface{}, err error){
 	url := "http://example.com/"
 	
 	resp, err := http.Get(url)
 	defer resp.Body.Close()
 	if err != nil {
-		// handle error
-		...
-		return url, err, false
+		return nil, err
 	}
-	return url, resp.Body, true
+	
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	return body, nil
 }
 
-f := Start(task).Done(func(v ...interface{}) {
+f := promise.Start(task).OnSuccess(func(v interface{}) {
    ...
-}).Always(func(v ...interface{}) {
+}).OnFailure(func(v interface{}) {
    ...
-}).Fail(func(v ...interface{}) {
+}).OnComplete(func(v interface{}) {
    ...
 })
-r, typ := f.Get()
+r, err := f.Get()
 ```
 
 ### Get the result of future
 
-```go
-f := promise.Start(func() []interface{} {
-	time.Sleep(500 * time.Millisecond)
-	return []interface{}{1, "ok", true}  
-})
-v, typ := f.Get()  //return []interface{}{1, "ok"}, RESULT_SUCCESS
+Please note the process will be block until the future task is completed
 
-f := promise.Start(func() []interface{} {
-	time.Sleep(500 * time.Millisecond)
-	return []interface{}{1, "fail", false}  
+```go
+f := promise.Start(func() (r interface{}, err error) {
+	return "ok", nil  
 })
-v, typ := f.Get()  //return []interface{}{1, "fail"},  RESULT_FAILURE
+r, err := f.Get()  //return "ok", nil
+
+f := promise.Start(func() (r interface{}, err error) {
+	return nil, errors.New("fail")  
+})
+r, err := f.Get()  //return nil, errorString{"fail"}
 ```
 
-Can wait until the future task to complete, then return its result
+Can wait until timeout
 
 ```go
-f := promise.Start(func() []interface{} {
+f := promise.Start(func() (r interface{}, err error) {
 	time.Sleep(500 * time.Millisecond)
-	return []interface{}{1, "ok", true}  
+	return "ok", nil 
 })
-v, typ, ok := f.GetOrTimeout(100)  //return nil, 0, false
+r, err, timeout := f.GetOrTimeout(100)  //return nil, nil, true
 ```
 
 ### Waits for multiple futures
 
-Creates a future that will complete when all of the supplied future have completed.
+Creates a future that will be completed when all of the supplied future are completed.
 ```go
-task1 := func() (r []interface{}) {
-	time.Sleep(100 * time.Millisecond)
-	r = []interface{}{10, "ok", true}
-	return
+task1 := func() (r interface{}, err error) {
+	return "ok1", nil
 }
-task2 := func() (r []interface{}) {
-	time.Sleep(200 * time.Millisecond)
-	r = []interface{}{20, "ok2", true}
+task2 := func() (r interface{}, err error) {
+	return "ok2", nil
 }
-f := WhenAll(Start(task1), Start(task2))
-r, ok := f.Get()
+
+f := promise.WhenAll(task1, task2)
+r, err := f.Get()    //return []interface{}{"ok1", "ok2"}
 ```
 
 If any future is failure, the future returnd by WhenAll will be failure
 ```go
-task1 := func() (r []interface{}) {
-	time.Sleep(100 * time.Millisecond)
-	r = []interface{}{10, "ok", true}
-	return
+task1 := func() (r interface{}, err error)  {
+	return "ok", nil
 }
-task2 := func() (r []interface{}) {
-	time.Sleep(200 * time.Millisecond)
-	r = []interface{}{20, "fail2", false}
+task2 := func() (r interface{}, err error)  {
+	return nil, errors.New("fail2")
 }
-f := WhenAll(Start(task1), Start(task2))
-r, ok := f.Get()
+f := promise.WhenAll(task1, task2)
+r, ok := f.Get()    //return nil, *AggregateError
 ```
 
-Creates a future that will complete when any of the supplied tasks have completed.
+Creates a future that will be completed when any of the supplied tasks is completed.
 ```go
-task1 := func() (r []interface{}) {
-	time.Sleep(100 * time.Millisecond)
-	r = []interface{}{10, "ok", true}
-	return
+task1 := func() (r interface{}, err error) {
+	return "ok1", nil
 }
-task2 := func() (r []interface{}) {
+task2 := func() (r interface{}, err error) {
 	time.Sleep(200 * time.Millisecond)
-	r = []interface{}{20, "fail2", false}
+	return nil, errors.New("fail2")
 }
-f := WhenAny(Start(task1), Start(task2))
-r, ok := f.Get()
+
+f := promise.WhenAny(task1, task2)
+r, err := f.Get()  //return "ok1", nil
 ```
 
 ### Promise pipelining
 
 ```go
-task1 := func() (r []interface{}) {
-	time.Sleep(100 * time.Millisecond)
-	r = []interface{}{10, "ok", true}
-	return
+task1 := func() (r interface{}, err error) {
+	return 10, nil
 }
-task2 := func(v ...interface{}) *Future {
-	return Start(func() []interface{} {
-		time.Sleep(100 * time.Millisecond)
-		return []interface{}{v[0].(int) * 2, v[1].(string) + "2", true}
+task2 := func(v interface{}) *Future {
+	return Start(func() (r interface{}, err error) {
+		return v.(int) * 2, nil
 	})
 }
-f := Start(task1).Pipe(task2)
-r, ok := f.Get()
+
+f := promise.Start(task1).Pipe(task2)
+r, err := f.Get()   //return 20
 ```
 
 ### Cancel the future
 
-If need cancel a future, need send a canceller object to 
+If need cancel a future, need pass a canceller object to task function
 ```go
 import "github.com/fanliao/go-promise"
 import "net/http"
 
 p := promise.NewPromise().EnableCanceller()
 
-go func(canceller Canceller){
+go func(canceller promise.Canceller){
 	for i < 50 {
 		if canceller.IsCancellationRequested() {
-			p.Cancel(0)
-			return 0
+			p.Cancel()
+			return
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	p.Resolve(1)
 }(p.Canceller())
 f.RequestCancel()
 
-r, typ := p.Get()
+r, err := p.Get()   //return nil, promise.CANCELLED
+fmt.Println(p.Future.IsCancelled())      //true
 ```
 
-Or can use StartCanCancel() to submit a future task which can be cancelled
+Or can use Start to submit a future task which can be cancelled
 ```go
-task := func(canceller Canceller) []interface{} {
+task := func(canceller promise.Canceller) (r interface{}, err error) {
 	for i < 50 {
 		if canceller.IsCancellationRequested() {
-			canceller.SetCancelled()
-			return 0
+			canceller.Cancel()
+			return 0, nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	return 1
+	return 1, nil
 }
-f := StartCanCancel(task1)
-time.Sleep(200 * time.Millisecond)
+f := promise.Start(task1)
 f.RequestCancel()
 
-r, ok := f.Get()
+r, err := f.Get()   //return nil, promise.CANCELLED
+fmt.Println(f.IsCancelled())      //true
 ```
 
-When call WhenAny() function, if a future is completed correctly, then will try to check if other future is enable cancel. If yes, will request cancelling the future
+When call WhenAny() function, if a future is completed correctly, then will try to check if other futures  enable cancel. If yes, will request cancelling all other futures.
 
 
 ## Document
@@ -247,3 +249,4 @@ When call WhenAny() function, if a future is completed correctly, then will try 
 
 ## License
 
+go-plinq is licensed under the MIT Licence, (http://www.apache.org/licenses/LICENSE-2.0.html).
