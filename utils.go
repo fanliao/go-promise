@@ -178,7 +178,15 @@ func execCallback(r *PromiseResult,
 
 	if r.Typ == RESULT_CANCELLED {
 		for _, f := range cancels {
-			f()
+			func() {
+				defer func() {
+					if e := recover(); e != nil {
+						err := newErrorWithStacks(e)
+						fmt.Println("error happens:\n ", err)
+					}
+				}()
+				f()
+			}()
 		}
 		return
 	}
@@ -201,7 +209,15 @@ func execCallback(r *PromiseResult,
 
 func forSlice(s []func(v interface{}), f func(func(v interface{}))) {
 	for _, e := range s {
-		f(e)
+		func() {
+			defer func() {
+				if e := recover(); e != nil {
+					err := newErrorWithStacks(e)
+					fmt.Println("error happens:\n ", err)
+				}
+			}()
+			f(e)
+		}()
 	}
 }
 
