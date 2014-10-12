@@ -224,7 +224,7 @@ func (this *Future) OnCancel(callback func()) *Future {
 //Pipe registers one or two functions that returns a Future, and returns a proxy of pipeline Future.
 //First function will be called when Future is resolved, the returned Future will be as pipeline Future.
 //Secondary function will be called when Futrue is rejected, the returned Future will be as pipeline Future.
-func (this *Future) Pipe(callbacks ...(func(v interface{}) *Future)) (result *Future, ok bool) {
+func (this *Future) Pipe(callbacks ...interface{}) (result *Future, ok bool) {
 	if len(callbacks) == 0 ||
 		(len(callbacks) == 1 && callbacks[0] == nil) ||
 		(len(callbacks) > 1 && callbacks[0] == nil && callbacks[1] == nil) {
@@ -232,21 +232,57 @@ func (this *Future) Pipe(callbacks ...(func(v interface{}) *Future)) (result *Fu
 		return
 	}
 
+	cs := make([]func(v interface{}) *Future, len(callbacks), len(callbacks))
+	for i, callback := range callbacks {
+		if c, ok1 := callback.(func(v interface{}) *Future); ok1 {
+			cs[i] = c
+		} else if c, ok1 := callback.(func(v interface{})); ok1 {
+			cs[i] = func(v interface{}) *Future {
+				return Start(func() {
+					c(v)
+				})
+			}
+		} else if c, ok1 := callback.(func(v interface{}) (r interface{}, err error)); ok1 {
+			cs[i] = func(v interface{}) *Future {
+				return Start(func() (r interface{}, err error) {
+					r, err = c(v)
+					return
+				})
+			}
+		} else if c, ok1 := callback.(func()); ok1 {
+			cs[i] = func(v interface{}) *Future {
+				return Start(func() {
+					c()
+				})
+			}
+		} else if c, ok1 := callback.(func() (r interface{}, err error)); ok1 {
+			cs[i] = func(v interface{}) *Future {
+				return Start(func() (r interface{}, err error) {
+					r, err = c()
+					return
+				})
+			}
+		} else {
+			ok = false
+			return
+		}
+	}
+
 	for {
 		v := this.loadVal()
 		r := v.r
 		if r != nil {
 			result = this
-			if r.Typ == RESULT_SUCCESS && callbacks[0] != nil {
-				result = (callbacks[0](r.Result))
-			} else if r.Typ == RESULT_FAILURE && len(callbacks) > 1 && callbacks[1] != nil {
-				result = (callbacks[1](r.Result))
+			if r.Typ == RESULT_SUCCESS && cs[0] != nil {
+				result = (cs[0](r.Result))
+			} else if r.Typ == RESULT_FAILURE && len(cs) > 1 && cs[1] != nil {
+				result = (cs[1](r.Result))
 			}
 		} else {
 			newPipe := &pipe{}
-			newPipe.pipeDoneTask = callbacks[0]
-			if len(callbacks) > 1 {
-				newPipe.pipeFailTask = callbacks[1]
+			newPipe.pipeDoneTask = cs[0]
+			if len(cs) > 1 {
+				newPipe.pipeFailTask = cs[1]
 			}
 			newPipe.pipePromise = NewPromise()
 
