@@ -550,11 +550,9 @@ func TestPipe(t *testing.T) {
 		})
 	}
 
-	taskFailPipe := func(v interface{}) *Future {
-		return Start(func() (interface{}, error) {
-			<-time.After(timout)
-			return "fail2", nil
-		})
+	taskFailPipe := func() (interface{}, error) {
+		<-time.After(timout)
+		return "fail2", nil
 	}
 
 	c.Convey("When task completed", t, func() {
