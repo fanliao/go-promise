@@ -62,7 +62,7 @@ type canceller struct {
 //If Future task detects CancellationRequested status, the execution can be stopped.
 //Future task must call Cancel() method of Canceller interface to set Future to Cancelled status
 func (this *canceller) RequestCancel() {
-	//只有当状态==0（表示初始状态）时才可以请求取消任务
+	//can request to cancel only when future is enable to cancel function
 	atomic.CompareAndSwapInt32(&this.f.cancelStatus, 0, 1)
 }
 
@@ -96,7 +96,9 @@ type Future struct {
 	Id    int //Id can be used as identity of Future
 	chOut chan *PromiseResult
 	chEnd chan struct{}
-	//指向futureVal的指针，程序要保证该指针指向的对象内容不会发送变化，任何变化都必须生成新对象并通过原子操作更新指针，以避免lock
+	//val point to futureVal that stores status of future
+	//if need to change the status of future, must copy a new futureVal and modify it,
+	//then use CAS to put the pointer of new futureVal
 	val          unsafe.Pointer
 	cancelStatus int32
 }
@@ -232,10 +234,15 @@ func (this *Future) Pipe(callbacks ...interface{}) (result *Future, ok bool) {
 		return
 	}
 
+	//ensure all callback functions match the spec "func(v interface{}) *Future"
 	cs := make([]func(v interface{}) *Future, len(callbacks), len(callbacks))
 	for i, callback := range callbacks {
 		if c, ok1 := callback.(func(v interface{}) *Future); ok1 {
 			cs[i] = c
+		} else if c, ok1 := callback.(func() *Future); ok1 {
+			cs[i] = func(v interface{}) *Future {
+				return c()
+			}
 		} else if c, ok1 := callback.(func(v interface{})); ok1 {
 			cs[i] = func(v interface{}) *Future {
 				return Start(func() {
@@ -288,7 +295,9 @@ func (this *Future) Pipe(callbacks ...interface{}) (result *Future, ok bool) {
 
 			newVal := *v
 			newVal.pipes = append(newVal.pipes, newPipe)
-			//通过CAS操作检测Future对象的原始状态未发生改变，否则需要重试
+
+			//use CAS to ensure that the state of Future is not changed,
+			//if the state is changed, will retry CAS operation.
 			if atomic.CompareAndSwapPointer(&this.val, unsafe.Pointer(v), unsafe.Pointer(&newVal)) {
 				result = newPipe.pipePromise.Future
 				break
@@ -388,7 +397,7 @@ func (this *Future) addCallback(callback interface{}, t callbackType) {
 				newVal.cancels = append(newVal.cancels, callback.(func()))
 			}
 
-			//so use CAS to ensure that the state of Future is not changed,
+			//use CAS to ensure that the state of Future is not changed,
 			//if the state is changed, will retry CAS operation.
 			if atomic.CompareAndSwapPointer(&this.val, unsafe.Pointer(v), unsafe.Pointer(&newVal)) {
 				break
