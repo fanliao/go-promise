@@ -187,6 +187,22 @@ f := promise.WhenAny(task1, task2)
 r, err := f.Get()  //return "ok1", nil
 ```
 
+Also can add a predicate function by WhenAnyMatched, the future that will be completed when any of the supplied tasks is completed and match the predicate.
+```go
+task1 := func() (r interface{}, err error) {
+	time.Sleep(200 * time.Millisecond)
+	return "ok1", nil
+}
+task2 := func() (r interface{}, err error) {
+	return "ok2", nil
+}
+
+f := promise.WhenAnyMatched(func(v interface{}) bool{
+	return v == "ok1"
+}, task1, task2)
+r, err := f.Get()  //return "ok1", nil
+```
+
 ### Promise pipelining
 
 ```go
