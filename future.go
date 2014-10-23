@@ -316,12 +316,12 @@ func (this *Future) setResult(r *PromiseResult) (e error) { //r *PromiseResult) 
 	}()
 
 	e = errors.New("Cannot resolve/reject/cancel more than once")
-	v := this.loadVal()
-	if v.r != nil {
-		return
-	}
 
 	for {
+		v := this.loadVal()
+		if v.r != nil {
+			return
+		}
 		newVal := *v
 		newVal.r = r
 
@@ -354,7 +354,6 @@ func (this *Future) setResult(r *PromiseResult) (e error) { //r *PromiseResult) 
 			e = nil
 			break
 		}
-		v = this.loadVal()
 	}
 	return
 }
