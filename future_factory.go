@@ -88,7 +88,7 @@ func WhenAnyMatched(predicate func(interface{}) bool, acts ...interface{}) *Futu
 		nf.Resolve(nil)
 	}
 
-	chFails, chDones := make(chan anyPromiseResult, len(acts)), make(chan anyPromiseResult, len(acts))
+	chFails, chDones := make(chan anyPromiseResult), make(chan anyPromiseResult)
 
 	go func() {
 		for i, f := range fs {

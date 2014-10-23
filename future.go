@@ -337,19 +337,19 @@ func (this *Future) setResult(r *PromiseResult) (e error) { //r *PromiseResult) 
 
 			//call callback functions and start the Promise pipeline
 			if len(v.dones) > 0 || len(v.fails) > 0 || len(v.always) > 0 || len(v.cancels) > 0 {
-				//go func() {
-				execCallback(r, v.dones, v.fails, v.always, v.cancels)
-				//}()
+				go func() {
+					execCallback(r, v.dones, v.fails, v.always, v.cancels)
+				}()
 			}
 
 			//start the pipeline
 			if len(v.pipes) > 0 {
-				//go func() {
-				for _, pipe := range v.pipes {
-					pipeTask, pipePromise := pipe.getPipe(r.Typ == RESULT_SUCCESS)
-					startPipe(r, pipeTask, pipePromise)
-				}
-				//}()
+				go func() {
+					for _, pipe := range v.pipes {
+						pipeTask, pipePromise := pipe.getPipe(r.Typ == RESULT_SUCCESS)
+						startPipe(r, pipeTask, pipePromise)
+					}
+				}()
 			}
 			e = nil
 			break
