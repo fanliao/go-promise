@@ -47,7 +47,7 @@ func (this *pipe) getPipe(isResolved bool) (func(v interface{}) *Future, *Promis
 //Canceller is used to check if the Promise be requested to cancel and cancel the Promise
 //It usually be passed to the real act function for letting act function can cancel the execution.
 type Canceller interface {
-	IsCancellationRequested() bool
+	IsCancelled() bool
 	Cancel()
 }
 
@@ -57,19 +57,11 @@ type canceller struct {
 	f *Future
 }
 
-//RequestCancel sets the status of Promise to CancellationRequested.
+//RequestCancel is obsolete. It is replaced by Cancel() method.
 //It don't mean the promise be surely cancelled.
-//If Future task detects CancellationRequested status, the execution can be stopped.
-//Future task must call Cancel() method of Canceller interface to set Future to Cancelled status
+//If Future task detects Cancelled status, the execution can be stopped.
 func (this *canceller) RequestCancel() {
-	//can request to cancel only when future is enable to cancel function
-	atomic.CompareAndSwapInt32(&this.f.cancelStatus, 0, 1)
-}
-
-//IsCancellationRequested returns true if Future task is requested to cancel, otherwise false.
-//Future task function can use this method to detect if Future is requested to cancel.
-func (this *canceller) IsCancellationRequested() (r bool) {
-	return atomic.LoadInt32(&this.f.cancelStatus) >= 1
+	this.Cancel()
 }
 
 //Cancel sets Future task to CANCELLED status
@@ -114,16 +106,9 @@ func (this *Future) Canceller() Canceller {
 	}
 }
 
-//RequestCancel request to cancel the promise
-//It don't mean the promise be surely cancelled, please refer to canceller.RequestCancel()
-func (this *Future) RequestCancel() bool {
-	ccstatus := atomic.LoadInt32(&this.cancelStatus)
-	if ccstatus == 0 {
-		atomic.CompareAndSwapInt32(&this.cancelStatus, 0, 1)
-		return true
-	} else {
-		return false
-	}
+//RequestCancel is obsolete. It is replaced by Cancel() method.
+func (this *Future) RequestCancel() (e error) {
+	return this.Cancel()
 }
 
 //IsCancelled returns true if the promise is cancelled, otherwise false
@@ -351,10 +336,20 @@ func (this *Future) setResult(r *PromiseResult) (e error) { //r *PromiseResult) 
 			close(this.chEnd)
 
 			//call callback functions and start the Promise pipeline
-			execCallback(r, v.dones, v.fails, v.always, v.cancels)
-			for _, pipe := range v.pipes {
-				pipeTask, pipePromise := pipe.getPipe(r.Typ == RESULT_SUCCESS)
-				startPipe(r, pipeTask, pipePromise)
+			if len(v.dones) > 0 || len(v.fails) > 0 || len(v.always) > 0 || len(v.cancels) > 0 {
+				//go func() {
+				execCallback(r, v.dones, v.fails, v.always, v.cancels)
+				//}()
+			}
+
+			//start the pipeline
+			if len(v.pipes) > 0 {
+				//go func() {
+				for _, pipe := range v.pipes {
+					pipeTask, pipePromise := pipe.getPipe(r.Typ == RESULT_SUCCESS)
+					startPipe(r, pipeTask, pipePromise)
+				}
+				//}()
 			}
 			e = nil
 			break

@@ -88,7 +88,7 @@ func WhenAnyMatched(predicate func(interface{}) bool, acts ...interface{}) *Futu
 		nf.Resolve(nil)
 	}
 
-	chFails, chDones := make(chan anyPromiseResult), make(chan anyPromiseResult)
+	chFails, chDones := make(chan anyPromiseResult, len(acts)), make(chan anyPromiseResult, len(acts))
 
 	go func() {
 		for i, f := range fs {
@@ -138,7 +138,7 @@ func WhenAnyMatched(predicate func(interface{}) bool, acts ...interface{}) *Futu
 					if predicate(r.result) {
 						//try to cancel other futures
 						for _, f := range fs {
-							f.RequestCancel()
+							f.Cancel()
 						}
 
 						//close the channel for avoid the send side be blocked
@@ -215,7 +215,7 @@ func whenAllFuture(fs ...*Future) *Future {
 		cancelOthers := func(j int) {
 			for k, f1 := range fs {
 				if k != j {
-					f1.RequestCancel()
+					f1.Cancel()
 				}
 			}
 		}
