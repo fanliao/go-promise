@@ -4,7 +4,7 @@ A quick start sample:
 
 
 fu := Start(func()(resp interface{}, err error){
-    resp, err := http.Get("http://example.com/")
+    resp, err = http.Get("http://example.com/")
     return
 })
 //do somthing...
@@ -44,24 +44,18 @@ func (this *pipe) getPipe(isResolved bool) (func(v interface{}) *Future, *Promis
 	}
 }
 
-//Canceller is used to check if the Promise be requested to cancel and cancel the Promise
-//It usually be passed to the real act function for letting act function can cancel the execution.
+//Canceller is used to check if the future is cancelled
+//It usually be passed to the future task function
+//for letting future task function can check if the future is cancelled.
 type Canceller interface {
 	IsCancelled() bool
 	Cancel()
 }
 
 //canceller provides an implement of Canceller interface.
-//It will be passed to Future task function as paramter of function
+//It will be passed to future task function as paramter
 type canceller struct {
 	f *Future
-}
-
-//RequestCancel is obsolete. It is replaced by Cancel() method.
-//It don't mean the promise be surely cancelled.
-//If Future task detects Cancelled status, the execution can be stopped.
-func (this *canceller) RequestCancel() {
-	this.Cancel()
 }
 
 //Cancel sets Future task to CANCELLED status
