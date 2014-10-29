@@ -63,8 +63,6 @@ Inspired by [Futures and promises]()
 
 ## Quick start
 
-* [GoDoc at godoc.org](http://godoc.org/github.com/fanliao/go-promise)
-
 ### Promise and Future 
 
 ```go
@@ -297,7 +295,7 @@ fmt.Println(f.IsCancelled()) //print true
 
 ## Document
 
-Outstanding...
+* [GoDoc at godoc.org](http://godoc.org/github.com/fanliao/go-promise)
 
 ## License
 
