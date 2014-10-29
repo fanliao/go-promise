@@ -2,7 +2,6 @@ package promise
 
 import (
 	"math/rand"
-	"sync/atomic"
 	"unsafe"
 )
 
@@ -64,12 +63,6 @@ func (this *Promise) Reject(err error) (e error) {
 	return this.setResult(&PromiseResult{err, RESULT_FAILURE})
 }
 
-//EnableCanceller sets a Promise can be cancelled.
-func (this *Promise) EnableCanceller() *Promise {
-	atomic.CompareAndSwapInt32(&this.cancelStatus, -1, 0)
-	return this
-}
-
 //OnSuccess registers a callback function that will be called when Promise is resolved.
 //If promise is already resolved, the callback will immediately called.
 //The value of Promise will be paramter of Done callback function.
@@ -103,7 +96,7 @@ func (this *Promise) OnCancel(callback func()) *Promise {
 	return this
 }
 
-//Factory function for Promise
+//NewPromise is factory function for Promise
 func NewPromise() *Promise {
 	val := &futureVal{
 		make([]func(v interface{}), 0, 8),
@@ -115,10 +108,8 @@ func NewPromise() *Promise {
 	f := &Promise{
 		&Future{
 			rand.Int(),
-			make(chan *PromiseResult, 1),
 			make(chan struct{}),
 			unsafe.Pointer(val),
-			-1,
 		},
 	}
 	return f

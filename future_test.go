@@ -175,6 +175,14 @@ func TestGetChan(t *testing.T) {
 			c.So(fr.Typ, c.ShouldEqual, RESULT_CANCELLED)
 			c.So(ok, c.ShouldBeTrue)
 		})
+
+		c.Convey("Should receive CancelledError from returned channel at second time", func() {
+			fr, ok := <-p.GetChan()
+			c.So(fr.Result, c.ShouldEqual, CANCELLED)
+			c.So(p.IsCancelled(), c.ShouldBeTrue)
+			c.So(fr.Typ, c.ShouldEqual, RESULT_CANCELLED)
+			c.So(ok, c.ShouldBeTrue)
+		})
 	})
 }
 
@@ -457,25 +465,14 @@ func TestStart(t *testing.T) {
 			c.So(err, c.ShouldBeNil)
 		})
 
-		c.Convey("When task be requested to cancel, but request be ignored", func() {
-			f := Start(func(canceller Canceller) {
-				time.Sleep(10)
-			})
-			f.RequestCancel()
-			r, err := f.Get()
-			c.So(f.IsCancelled(), c.ShouldBeFalse)
-			c.So(r, c.ShouldBeNil)
-			c.So(err, c.ShouldBeNil)
-		})
-
 		c.Convey("When task be cancelled", func() {
 			f := Start(func(canceller Canceller) {
 				time.Sleep(10)
-				if canceller.IsCancellationRequested() {
-					canceller.Cancel()
+				if canceller.IsCancelled() {
+					return
 				}
 			})
-			f.RequestCancel()
+			f.Cancel()
 			r, err := f.Get()
 			c.So(f.IsCancelled(), c.ShouldBeTrue)
 			c.So(r, c.ShouldBeNil)
@@ -491,27 +488,11 @@ func TestStart(t *testing.T) {
 	})
 
 	c.Convey("Test start func(canceller Canceller)(interface{}, error)", t, func() {
-		c.Convey("When task be requested to cancel, but request be ignored", func() {
-			task := func(canceller Canceller) (interface{}, error) {
-				time.Sleep(100 * time.Millisecond)
-				return 1, nil
-			}
-			f := Start(task)
-			cancel := f.RequestCancel()
-			c.So(cancel, c.ShouldBeTrue)
-
-			r, err := f.Get()
-			c.So(f.IsCancelled(), c.ShouldBeFalse)
-			c.So(err, c.ShouldBeNil)
-			c.So(r, c.ShouldEqual, 1)
-		})
-
 		c.Convey("When task be cancenlled", func() {
 			task := func(canceller Canceller) (interface{}, error) {
 				i := 0
 				for i < 50 {
-					if canceller.IsCancellationRequested() {
-						canceller.Cancel()
+					if canceller.IsCancelled() {
 						return nil, nil
 					}
 					time.Sleep(100 * time.Millisecond)
@@ -520,7 +501,7 @@ func TestStart(t *testing.T) {
 			}
 
 			f := Start(task)
-			f.RequestCancel()
+			f.Cancel()
 			r, err := f.Get()
 
 			c.So(f.IsCancelled(), c.ShouldBeTrue)
@@ -676,8 +657,7 @@ func TestWhenAny(t *testing.T) {
 						} else {
 							time.Sleep((-1 * timeouts[i]) * time.Millisecond)
 						}
-						if canceller.IsCancellationRequested() {
-							canceller.Cancel()
+						if canceller.IsCancelled() {
 							if i == 0 {
 								c1 = true
 							} else {
@@ -731,8 +711,7 @@ func TestWhenAnyTrue(t *testing.T) {
 					} else {
 						time.Sleep((-1 * timeouts[i]) * time.Millisecond)
 					}
-					if canceller.IsCancellationRequested() {
-						canceller.Cancel()
+					if canceller.IsCancelled() {
 						if i == 0 {
 							c1 = true
 						} else {
@@ -874,8 +853,7 @@ func TestWhenAll(t *testing.T) {
 			getTask := func(canceller Canceller) (interface{}, error) {
 				for {
 					time.Sleep(50 * time.Millisecond)
-					if canceller.IsCancellationRequested() {
-						canceller.Cancel()
+					if canceller.IsCancelled() {
 						return nil, nil
 					}
 				}
@@ -885,8 +863,8 @@ func TestWhenAll(t *testing.T) {
 			f2 := Start(getTask)
 			f3 := WhenAll(f1, f2)
 
-			f1.RequestCancel()
-			f2.RequestCancel()
+			f1.Cancel()
+			f2.Cancel()
 
 			r, _ := f3.Get()
 			c.So(r, c.ShouldBeNil)
