@@ -63,6 +63,8 @@ Inspired by [Futures and promises]()
 
 ## Quick start
 
+* [GoDoc at godoc.org](http://godoc.org/github.com/fanliao/go-promise)
+
 ### Promise and Future 
 
 ```go
