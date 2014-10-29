@@ -9,8 +9,26 @@ type anyPromiseResult struct {
 	i      int
 }
 
-//Start calls act function and return a Future that presents the result.
+//Start start a goroutines to execute task function
+//and return a Future that presents the result.
 //If option paramter is true, the act function will be sync called.
+//Type of act can be any of below four types:
+//  func() (r interface{}, err error):
+//     if err returned by act != nil or panic error, then Future will be rejected with error,
+//     otherwise be resolved with r.
+//  func():
+//     if act panic error, then Future will be rejected, otherwise be resolved with nil.
+//  func(c promise.Canceller) (r interface{}, err error):
+//     if err returned by act != nil or panic error,
+//     then Future will be rejected with err, otherwise be resolved with r.
+//     We can check c.IsCancelled() to decide whether need to exit act function
+//  func(promise.Canceller):
+//     if act panic error, then Future will be rejected with error, otherwise be resolved with nil.
+//     We can check c.IsCancelled() to decide whether need to exit act function.
+//  error:
+//     Future will be rejected with error immediately
+//  other value:
+//     Future will be resolved with value immediately
 func Start(act interface{}, syncs ...bool) *Future {
 	pr := NewPromise()
 	if f, ok := act.(*Future); ok {
@@ -65,6 +83,7 @@ func Wrap(value interface{}) *Future {
 //WhenAny returns a Future.
 //If any Future is resolved, this Future will be resolved and return result of resolved Future.
 //Otherwise will rejected with results slice returned by all Futures
+//Legit types of act are same with Start function
 func WhenAny(acts ...interface{}) *Future {
 	return WhenAnyMatched(nil, acts...)
 }
@@ -73,6 +92,7 @@ func WhenAny(acts ...interface{}) *Future {
 //If any Future is resolved and match the predicate, this Future will be resolved and return result of resolved Future.
 //If all Futures are cancelled, this Future will be cancelled.
 //Otherwise will rejected with a NoMatchedError included results slice returned by all Futures
+//Legit types of act are same with Start function
 func WhenAnyMatched(predicate func(interface{}) bool, acts ...interface{}) *Future {
 	if predicate == nil {
 		predicate = func(v interface{}) bool { return true }
@@ -183,6 +203,7 @@ func WhenAnyMatched(predicate func(interface{}) bool, acts ...interface{}) *Futu
 //WhenAll receives function slice and returns a Future.
 //If all Futures are resolved, this Future will be resolved and return results slice.
 //Otherwise will rejected with results slice returned by all Futures
+//Legit types of act are same with Start function
 func WhenAll(acts ...interface{}) (fu *Future) {
 	pr := NewPromise()
 	fu = pr.Future
@@ -204,6 +225,7 @@ func WhenAll(acts ...interface{}) (fu *Future) {
 //If all Futures are resolved, this Future will be resolved and return results slice.
 //If any Future is cancelled, this Future will be cancelled.
 //Otherwise will rejected with results slice returned by all Futures.
+//Legit types of act are same with Start function
 func whenAllFuture(fs ...*Future) *Future {
 	wf := NewPromise()
 	rs := make([]interface{}, len(fs))
@@ -245,7 +267,7 @@ func whenAllFuture(fs ...*Future) *Future {
 						//try to cancel all futures
 						cancelOthers(j)
 
-						wf.EnableCanceller().Cancel()
+						wf.Cancel()
 					}
 				})
 			}

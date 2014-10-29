@@ -46,7 +46,7 @@ func (this *pipe) getPipe(isResolved bool) (func(v interface{}) *Future, *Promis
 
 //Canceller is used to check if the future is cancelled
 //It usually be passed to the future task function
-//for letting future task function can check if the future is cancelled.
+//for future task function can check if the future is cancelled.
 type Canceller interface {
 	IsCancelled() bool
 	Cancel()
@@ -65,7 +65,7 @@ func (this *canceller) Cancel() {
 
 //IsCancelled returns true if Future task is cancelld, otherwise false.
 func (this *canceller) IsCancelled() (r bool) {
-	return atomic.LoadInt32(&this.f.cancelStatus) == 2
+	return this.f.IsCancelled()
 }
 
 //futureVal stores the internal state of Future.
@@ -80,39 +80,31 @@ type futureVal struct {
 //the value is set by using Resolve, Reject and Cancel methods of related Promise
 type Future struct {
 	Id    int //Id can be used as identity of Future
-	chEnd chan struct{}
+	final chan struct{}
 	//val point to futureVal that stores status of future
 	//if need to change the status of future, must copy a new futureVal and modify it,
 	//then use CAS to put the pointer of new futureVal
-	val          unsafe.Pointer
-	cancelStatus int32
+	val unsafe.Pointer
 }
 
-//Canceller returns a canceller related to future.
-//If Canceller return nil, the futrue cannot be cancelled.
+//Canceller returns a canceller object related to future.
 func (this *Future) Canceller() Canceller {
-	ccstatus := atomic.LoadInt32(&this.cancelStatus)
-	if ccstatus >= 0 {
-		return &canceller{this}
-	} else {
-		return nil
-	}
-}
-
-//RequestCancel is obsolete. It is replaced by Cancel() method.
-func (this *Future) RequestCancel() (e error) {
-	return this.Cancel()
+	return &canceller{this}
 }
 
 //IsCancelled returns true if the promise is cancelled, otherwise false
 func (this *Future) IsCancelled() bool {
-	ccstatus := atomic.LoadInt32(&this.cancelStatus)
-	return ccstatus == 2
+	val := this.loadVal()
+
+	if val != nil && val.r != nil && val.r.Typ == RESULT_CANCELLED {
+		return true
+	} else {
+		return false
+	}
 }
 
-//Cancel sets the status of promise to RESULT_CANCELLED.
-//If promise is cancelled, Get() will return nil and CANCELLED error.
-//All callback functions will be not called if Promise is cancalled.
+//SetTimeout sets the future task will be cancelled
+//if future is not complete before time out
 func (this *Future) SetTimeout(mm int) *Future {
 	if mm == 0 {
 		mm = 10
@@ -143,7 +135,7 @@ func (this *Future) GetChan() <-chan *PromiseResult {
 //If Future is rejected, nil and error will be returned.
 //If Future is cancelled, nil and CANCELLED error will be returned.
 func (this *Future) Get() (val interface{}, err error) {
-	<-this.chEnd
+	<-this.final
 	return getFutureReturnVal(this.loadResult())
 }
 
@@ -160,7 +152,7 @@ func (this *Future) GetOrTimeout(mm uint) (val interface{}, err error, timout bo
 	select {
 	case <-time.After((time.Duration)(mm) * time.Nanosecond):
 		return nil, nil, true
-	case <-this.chEnd:
+	case <-this.final:
 		r, err := getFutureReturnVal(this.loadResult())
 		return r, err, false
 	}
@@ -170,7 +162,6 @@ func (this *Future) GetOrTimeout(mm uint) (val interface{}, err error, timout bo
 //If promise is cancelled, Get() will return nil and CANCELLED error.
 //All callback functions will be not called if Promise is cancalled.
 func (this *Future) Cancel() (e error) {
-	atomic.StoreInt32(&this.cancelStatus, 2)
 	return this.setResult(&PromiseResult{CANCELLED, RESULT_CANCELLED})
 }
 
@@ -329,7 +320,7 @@ func (this *Future) setResult(r *PromiseResult) (e error) { //r *PromiseResult) 
 		//No ABA issue in this case because address of all objects are different.
 		if atomic.CompareAndSwapPointer(&this.val, unsafe.Pointer(v), unsafe.Pointer(&newVal)) {
 			//Close chEnd then all Get() and GetOrTimeout() will be unblocked
-			close(this.chEnd)
+			close(this.final)
 
 			//call callback functions and start the Promise pipeline
 			if len(v.dones) > 0 || len(v.fails) > 0 || len(v.always) > 0 || len(v.cancels) > 0 {
