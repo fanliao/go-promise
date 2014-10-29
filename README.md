@@ -11,42 +11,56 @@ Inspired by [Futures and promises]()
 ## Features
 
 * Future and Promise
+
   * ```NewPromise()```
   * ```promise.Future```
+
 * Promise and Future callbacks
+
   * ```.OnSuccess(v interface{})```
   * ```.OnFailure(v interface{})```
   * ```.OnComplete(v interface{})```
   * ```.OnCancel()```
-* Get the value of the future
+
+* Get the result of future
+
   * ```.Get() ```
-  * ```.GetOrTimeout(ms)```
+  * ```.GetOrTimeout()```
   * ```.GetChan()```
+
+* Set timeout for future
+
+  * ```.SetTimeout(ms)```
+  
 * Merge multiple promises
-  * ```WhenAll(f1, f2, f3, ...)```
-  * ```WhenAny(f1, f2, f3, ...)```
-  * ```WhenAnyMatched(predicate, f1, f2, f3, ...)```
+
+  * ```WhenAll(func1, func2, func3, ...)```
+  * ```WhenAny(func1, func2, func3, ...)```
+  * ```WhenAnyMatched(func1, func2, func3, ...)```
+
 * Pipe
-  * ```.Pipe(futureWithDone, futureWithFail)```
+  * ```.Pipe(funcWithDone, funcWithFail)```
+
 * Cancel the future
-  * ```.EnableCanceller()```
-  * ```.RequestCancel()```
-  * ```.IsCancellationRequested()```
+
   * ```.Cancel()```
-  * ```.IsCancelled(ms)```
-* Set timeout for Future
-  * ```.SetTimeout()```
-* Function wrappers
+  * ```.IsCancelled()```
+
+* Create future by function
+
   * ```Start(func() (r interface{}, e error))```
   * ```Start(func())```
   * ```Start(func(canceller Canceller) (r interface{}, e error))```
   * ```Start(func(canceller Canceller))```
-* Immediate wrappers
-  * ```Wrap(interface{})```
-* Chain API
-  * ```Start(taskDone).OnSuccess(done1).OnFailure(fail1).Pipe(f1, f2).OnSuccess(done2)```
 
-	
+* Immediate wrappers
+
+  * ```Wrap(interface{})```
+
+* Chain API
+
+  * ```Start(taskDone).Done(done1).Fail(fail1).Always(alwaysForDone1).Pipe(f1, f2).Done(done2)```
+
 ## Quick start
 
 ### Promise and Future 
@@ -85,7 +99,7 @@ r, err := p.Get()
 If you want to provide a read-only view, you can get a future variable:
 
 ```go
-p.Future //cannot Resolve, Reject and EnableCanceller for a future
+p.Future //cannot Resolve, Reject for a future
 ```
 
 Can use Start function to submit a future task, it will return a future variable, so cannot Resolve or Reject the future outside of Start function:
@@ -209,10 +223,8 @@ r, err := f.Get()  //return "ok1", nil
 task1 := func() (r interface{}, err error) {
 	return 10, nil
 }
-task2 := func(v interface{}) *Future {
-	return Start(func() (r interface{}, err error) {
-		return v.(int) * 2, nil
-	})
+task2 := func(v interface{}) (r interface{}, err error) {
+	return v.(int) * 2, nil
 }
 
 f := promise.Start(task1).Pipe(task2)
@@ -221,7 +233,7 @@ r, err := f.Get()   //return 20
 
 ### Cancel the future or set timeout
 
-If need cancel a future, need pass a canceller object to task function
+If need cancel a future, can pass a canceller object to task function
 ```go
 import "github.com/fanliao/go-promise"
 import "net/http"
@@ -230,14 +242,13 @@ p := promise.NewPromise().EnableCanceller()
 
 go func(canceller promise.Canceller){
 	for i < 50 {
-		if canceller.IsCancellationRequested() {
-			p.Cancel()
+		if canceller.IsCancelled() {
 			return
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 }(p.Canceller())
-f.RequestCancel()
+f.Cancel()
 
 r, err := p.Get()   //return nil, promise.CANCELLED
 fmt.Println(p.Future.IsCancelled())      //true
@@ -247,8 +258,7 @@ Or can use Start to submit a future task which can be cancelled
 ```go
 task := func(canceller promise.Canceller) (r interface{}, err error) {
 	for i < 50 {
-		if canceller.IsCancellationRequested() {
-			canceller.Cancel()
+		if canceller.IsCancelled() {
 			return 0, nil
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -256,7 +266,7 @@ task := func(canceller promise.Canceller) (r interface{}, err error) {
 	return 1, nil
 }
 f := promise.Start(task1)
-f.RequestCancel()
+f.Cancel()
 
 r, err := f.Get()   //return nil, promise.CANCELLED
 fmt.Println(f.IsCancelled())      //true
@@ -269,8 +279,10 @@ You can also set timeout for a future
 ```go
 task := func(canceller promise.Canceller) (r interface{}, err error) {
 	time.Sleep(300 * time.Millisecond)
-	fmt.Println("Run done")
-	return 0, nil
+	if !canceller.IsCancelled(){
+		fmt.Println("Run done")
+	} 
+	return
 }
 
 f := promise.Start(task).OnCancel(func() {
