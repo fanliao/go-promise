@@ -115,7 +115,6 @@ func NewPromise() *Promise {
 	f := &Promise{
 		&Future{
 			rand.Int(),
-			make(chan *PromiseResult, 1),
 			make(chan struct{}),
 			unsafe.Pointer(val),
 			-1,

@@ -175,6 +175,14 @@ func TestGetChan(t *testing.T) {
 			c.So(fr.Typ, c.ShouldEqual, RESULT_CANCELLED)
 			c.So(ok, c.ShouldBeTrue)
 		})
+
+		c.Convey("Should receive CancelledError from returned channel at second time", func() {
+			fr, ok := <-p.GetChan()
+			c.So(fr.Result, c.ShouldEqual, CANCELLED)
+			c.So(p.IsCancelled(), c.ShouldBeTrue)
+			c.So(fr.Typ, c.ShouldEqual, RESULT_CANCELLED)
+			c.So(ok, c.ShouldBeTrue)
+		})
 	})
 }
 

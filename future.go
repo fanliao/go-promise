@@ -86,7 +86,6 @@ type futureVal struct {
 //the value is set by using Resolve, Reject and Cancel methods of related Promise
 type Future struct {
 	Id    int //Id can be used as identity of Future
-	chOut chan *PromiseResult
 	chEnd chan struct{}
 	//val point to futureVal that stores status of future
 	//if need to change the status of future, must copy a new futureVal and modify it,
@@ -135,8 +134,14 @@ func (this *Future) SetTimeout(mm int) *Future {
 }
 
 //GetChan returns a channel than can be used to receive result of Promise
-func (this *Future) GetChan() chan *PromiseResult {
-	return this.chOut
+func (this *Future) GetChan() <-chan *PromiseResult {
+	c := make(chan *PromiseResult, 1)
+	this.OnComplete(func(v interface{}) {
+		c <- this.loadResult()
+	}).OnCancel(func() {
+		c <- this.loadResult()
+	})
+	return c
 }
 
 //Get will block current goroutines until the Future is resolved/rejected/cancelled.
@@ -329,9 +334,6 @@ func (this *Future) setResult(r *PromiseResult) (e error) { //r *PromiseResult) 
 		//If the state is changed, must get latest state and try to call CAS again.
 		//No ABA issue in this case because address of all objects are different.
 		if atomic.CompareAndSwapPointer(&this.val, unsafe.Pointer(v), unsafe.Pointer(&newVal)) {
-			//chOut will be returned in GetChan(), so send the result to chOut
-			this.chOut <- r
-
 			//Close chEnd then all Get() and GetOrTimeout() will be unblocked
 			close(this.chEnd)
 
